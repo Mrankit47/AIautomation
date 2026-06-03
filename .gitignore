@@ -1,0 +1,58 @@
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual Environments ─────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── IDE ───────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Environment ──────────────────────────────────────────
+.env
+.env.local
+.env.production
+
+# ── Tool Caches ──────────────────────────────────────────
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── Runtime Directories ──────────────────────────────────
+logs/*.log
+logs/*.json
+outputs/*
+!outputs/.gitkeep
+!logs/.gitkeep
+
+# ── Database ─────────────────────────────────────────────
+*.db
+*.sqlite3
+
+# ── Media Assets (user-uploaded) ─────────────────────────
+backend/media/fonts/*.ttf
+backend/media/fonts/*.otf
+backend/media/music/*.mp3
+backend/media/music/*.wav
+backend/media/reel_templates/*.mp4
+
+# ── OS ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini

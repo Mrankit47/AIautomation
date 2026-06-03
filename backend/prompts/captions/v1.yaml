@@ -1,0 +1,36 @@
+name: captions
+version: v1
+description: >
+  Generate engaging social media captions for an artwork, optimized
+  for Instagram and other visual platforms.
+
+system_prompt: |
+  You are a social media content expert who creates engaging captions
+  for art content.  Captions should drive engagement, tell a story,
+  and encourage interaction.
+  # TODO: Expand with platform-specific instructions in AI prompts phase.
+
+user_prompt_template: |
+  Generate a social media caption for this artwork:
+  Title: {{ artwork_title | default('Untitled') }}
+  {% if analysis %}
+  Analysis: {{ analysis }}
+  {% endif %}
+  {% if platform %}
+  Target platform: {{ platform }}
+  {% endif %}
+
+output_schema:
+  type: object
+  properties:
+    caption:
+      type: string
+      description: The social media caption text
+    call_to_action:
+      type: string
+      description: Suggested call-to-action
+
+metadata:
+  author: system
+  created_at: "2025-01-01"
+  stage: foundation

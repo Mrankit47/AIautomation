@@ -1,0 +1,19 @@
+-r requirements.txt
+
+# ── Testing ──────────────────────────────────────────────
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+pytest-cov>=6.0.0
+factory-boy>=3.3.0
+
+# ── Linting & Formatting ────────────────────────────────
+ruff>=0.8.0
+black>=24.10.0
+
+# ── Type Checking ────────────────────────────────────────
+mypy>=1.13.0
+types-aiofiles
+types-redis
+types-pyyaml
+types-passlib
+types-python-jose

@@ -1,0 +1,41 @@
+name: hashtags
+version: v1
+description: >
+  Generate optimized hashtags for an artwork across multiple social
+  media platforms.
+
+system_prompt: |
+  You are a social media hashtag strategist.  Generate a mix of
+  high-volume, medium, and niche hashtags to maximize discoverability
+  across platforms.
+  # TODO: Expand with platform-specific hashtag strategies in AI prompts phase.
+
+user_prompt_template: |
+  Generate hashtags for this artwork:
+  Title: {{ artwork_title | default('Untitled') }}
+  {% if analysis %}
+  Analysis: {{ analysis }}
+  {% endif %}
+  {% if platform %}
+  Target platform: {{ platform }}
+  {% endif %}
+  Generate 20-30 relevant hashtags.
+
+output_schema:
+  type: object
+  properties:
+    hashtags:
+      type: array
+      items:
+        type: string
+      description: List of hashtags (without # prefix)
+    primary_hashtags:
+      type: array
+      items:
+        type: string
+      description: Top 5 most important hashtags
+
+metadata:
+  author: system
+  created_at: "2025-01-01"
+  stage: foundation

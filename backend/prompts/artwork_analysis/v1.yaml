@@ -1,0 +1,51 @@
+name: artwork_analysis
+version: v1
+description: >
+  Analyze an artwork image for style, medium, mood, subject matter,
+  color palette, and composition.  This prompt will be refined in the
+  AI prompts implementation phase.
+
+system_prompt: |
+  You are an expert art analyst with deep knowledge of art history,
+  contemporary art, digital art, and visual design.  Analyze the
+  provided artwork image thoroughly.
+  # TODO: Expand with detailed analysis instructions in AI prompts phase.
+
+user_prompt_template: |
+  Analyze this artwork: {{ artwork_title | default('Untitled') }}
+  {% if context %}
+  Additional context: {{ context }}
+  {% endif %}
+  Provide a comprehensive analysis covering style, medium, mood,
+  subject matter, color palette, and composition.
+
+output_schema:
+  type: object
+  properties:
+    style:
+      type: string
+      description: Art style (e.g., impressionism, abstract, digital)
+    medium:
+      type: string
+      description: Art medium (e.g., oil on canvas, digital, watercolor)
+    mood:
+      type: string
+      description: Overall mood or emotional tone
+    subjects:
+      type: array
+      items:
+        type: string
+      description: List of identified subjects
+    color_palette:
+      type: array
+      items:
+        type: string
+      description: Dominant colors
+    composition:
+      type: string
+      description: Composition analysis
+
+metadata:
+  author: system
+  created_at: "2025-01-01"
+  stage: foundation

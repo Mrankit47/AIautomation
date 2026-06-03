@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-dev.txt requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
+COPY . /app
+
+# Ensure scripts are executable
+RUN chmod +x /app/scripts/*.sh
+
+EXPOSE 8000
+
+CMD ["/app/scripts/dev.sh"]

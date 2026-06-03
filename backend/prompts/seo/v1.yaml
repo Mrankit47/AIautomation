@@ -1,0 +1,38 @@
+name: seo
+version: v1
+description: >
+  Generate SEO-optimized title, description, and keywords for an artwork
+  based on its analysis data.
+
+system_prompt: |
+  You are an expert SEO strategist specializing in art and visual content.
+  Generate search-engine-optimized metadata that maximizes discoverability.
+  # TODO: Expand with detailed SEO instructions in AI prompts phase.
+
+user_prompt_template: |
+  Generate SEO metadata for this artwork:
+  Title: {{ artwork_title | default('Untitled') }}
+  {% if analysis %}
+  Analysis: {{ analysis }}
+  {% endif %}
+  Generate an SEO-optimized title, meta description, and keywords.
+
+output_schema:
+  type: object
+  properties:
+    seo_title:
+      type: string
+      description: SEO-optimized title (50-60 characters)
+    meta_description:
+      type: string
+      description: Meta description (150-160 characters)
+    keywords:
+      type: array
+      items:
+        type: string
+      description: Target keywords for search
+
+metadata:
+  author: system
+  created_at: "2025-01-01"
+  stage: foundation

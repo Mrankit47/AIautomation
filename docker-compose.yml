@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: artwork-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-artwork_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-artwork_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-artwork_automation}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-artwork_user} -d ${POSTGRES_DB:-artwork_automation}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: artwork-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: artwork-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./outputs:/app/outputs
+      - ./logs:/app/logs
+    restart: always
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: artwork-celery-worker
+    command: /app/scripts/start_celery.sh
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    volumes:
+      - ./outputs:/app/outputs
+      - ./logs:/app/logs
+    restart: always
+
+volumes:
+  postgres_data:
+  redis_data:
