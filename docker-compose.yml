@@ -47,6 +47,15 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      - POSTGRES__HOST=postgres
+      - POSTGRES_HOST=postgres
+      - REDIS__HOST=redis
+      - REDIS_HOST=redis
+      - CELERY__BROKER_URL=redis://redis:6379/1
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY__RESULT_BACKEND=redis://redis:6379/2
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
     volumes:
       - ./outputs:/app/outputs
       - ./logs:/app/logs
@@ -65,6 +74,15 @@ services:
         condition: service_healthy
     env_file:
       - .env
+    environment:
+      - POSTGRES__HOST=postgres
+      - POSTGRES_HOST=postgres
+      - REDIS__HOST=redis
+      - REDIS_HOST=redis
+      - CELERY__BROKER_URL=redis://redis:6379/1
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY__RESULT_BACKEND=redis://redis:6379/2
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
     volumes:
       - ./outputs:/app/outputs
       - ./logs:/app/logs
