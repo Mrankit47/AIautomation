@@ -12,7 +12,15 @@ from backend.core.exceptions import NotFoundException, ValidationException
 from backend.core.logging import get_logger
 from backend.database.repository import BaseRepository
 from backend.models.artwork import Artwork, ArtworkStatus
-from backend.schemas.artwork import ArtworkListResponse, ArtworkResponse
+from backend.schemas.artwork import (
+    ArtworkAnalysisResponse,
+    ArtworkCaptionResponse,
+    ArtworkHashtagsResponse,
+    ArtworkListResponse,
+    ArtworkReelScriptResponse,
+    ArtworkResponse,
+    ArtworkSEOResponse,
+)
 from backend.storage.base import StorageBackend
 
 logger = get_logger(__name__)
@@ -137,3 +145,55 @@ class ArtworkService:
             new_status=status.value,
         )
         return ArtworkResponse.model_validate(artwork)
+
+    async def get_analysis(self, artwork_id: uuid.UUID) -> ArtworkAnalysisResponse:
+        """Retrieve artwork analysis results."""
+        artwork = await self._repo.get_by_id(artwork_id)
+        if artwork is None:
+            raise NotFoundException(detail=f"Artwork {artwork_id} not found.")
+        return ArtworkAnalysisResponse(
+            artwork_id=artwork.id,
+            analysis_data=artwork.analysis_data,
+        )
+
+    async def get_seo(self, artwork_id: uuid.UUID) -> ArtworkSEOResponse:
+        """Retrieve artwork SEO-optimized metadata."""
+        artwork = await self._repo.get_by_id(artwork_id)
+        if artwork is None:
+            raise NotFoundException(detail=f"Artwork {artwork_id} not found.")
+        return ArtworkSEOResponse(
+            artwork_id=artwork.id,
+            seo_data=artwork.seo_data,
+        )
+
+    async def get_caption(self, artwork_id: uuid.UUID) -> ArtworkCaptionResponse:
+        """Retrieve artwork platform captions and titles."""
+        artwork = await self._repo.get_by_id(artwork_id)
+        if artwork is None:
+            raise NotFoundException(detail=f"Artwork {artwork_id} not found.")
+        return ArtworkCaptionResponse(
+            artwork_id=artwork.id,
+            caption=artwork.caption,
+            youtube_title=artwork.youtube_title,
+            youtube_description=artwork.youtube_description,
+        )
+
+    async def get_hashtags(self, artwork_id: uuid.UUID) -> ArtworkHashtagsResponse:
+        """Retrieve artwork hashtags."""
+        artwork = await self._repo.get_by_id(artwork_id)
+        if artwork is None:
+            raise NotFoundException(detail=f"Artwork {artwork_id} not found.")
+        return ArtworkHashtagsResponse(
+            artwork_id=artwork.id,
+            hashtags=artwork.hashtags,
+        )
+
+    async def get_reel_script(self, artwork_id: uuid.UUID) -> ArtworkReelScriptResponse:
+        """Retrieve artwork reel video script."""
+        artwork = await self._repo.get_by_id(artwork_id)
+        if artwork is None:
+            raise NotFoundException(detail=f"Artwork {artwork_id} not found.")
+        return ArtworkReelScriptResponse(
+            artwork_id=artwork.id,
+            reel_script=artwork.reel_script,
+        )

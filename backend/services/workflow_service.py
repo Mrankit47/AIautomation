@@ -72,8 +72,12 @@ class WorkflowService:
             error_history=[],
         )
 
-        # Dispatch Celery task
-        task = execute_workflow.delay(str(artwork_id), version)
+        # Dispatch Celery task — pass workflow_run.id so the task can update status
+        task = execute_workflow.delay(
+            str(workflow_run.id),
+            str(artwork_id),
+            version,
+        )
 
         # Update run with task ID
         await self._workflow_repo.update(

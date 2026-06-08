@@ -1,7 +1,13 @@
-"""Google Gemini AI provider implementation."""
+"""Google Gemini AI provider implementation.
+
+Production-ready provider with retry logic, timeout support,
+and structured JSON output via the google-generativeai SDK.
+"""
 
 from __future__ import annotations
 
+import json
+import time
 from typing import Any
 
 import google.generativeai as genai
@@ -29,6 +35,8 @@ class GeminiProvider(AIProvider):
         self._timeout = settings.gemini.timeout
 
         api_key = settings.gemini.api_key.get_secret_value()
+        if not api_key or api_key == "mock-api-key":
+            logger.warning("gemini_api_key_missing_or_mock")
         if api_key:
             genai.configure(api_key=api_key)
 
@@ -38,6 +46,37 @@ class GeminiProvider(AIProvider):
     def provider_name(self) -> str:
         return "Gemini"
 
+    def _retry_with_backoff(self, func, *args, **kwargs) -> Any:
+        """Execute a function with exponential backoff retry."""
+        last_exc = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                return func(*args, **kwargs)
+            except Exception as exc:
+                last_exc = exc
+                if attempt < self._max_retries:
+                    wait = min(2 ** attempt, 30)
+                    logger.warning(
+                        "gemini_retry",
+                        attempt=attempt + 1,
+                        max_retries=self._max_retries,
+                        wait_seconds=wait,
+                        error=str(exc),
+                    )
+                    time.sleep(wait)
+        raise last_exc  # type: ignore[misc]
+
+    def _parse_json_from_text(self, text: str) -> dict[str, Any]:
+        """Extract JSON from model response text, handling markdown fences."""
+        cleaned = text.strip()
+        # Strip markdown code fences if present
+        if cleaned.startswith("```"):
+            lines = cleaned.split("\n")
+            # Remove first line (```json or ```) and last line (```)
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            cleaned = "\n".join(lines).strip()
+        return json.loads(cleaned)
+
     async def analyze_image(
         self,
         image_data: bytes,
@@ -45,11 +84,7 @@ class GeminiProvider(AIProvider):
         *,
         mime_type: str = "image/png",
     ) -> AIImageAnalysisResult:
-        """Analyze an artwork image via Gemini vision capabilities.
-
-        Note: Full implementation deferred to the AI prompts phase.
-        The provider infrastructure and error handling are production-ready.
-        """
+        """Analyze an artwork image via Gemini vision capabilities."""
         try:
             logger.info(
                 "gemini_analyze_image",
@@ -57,13 +92,55 @@ class GeminiProvider(AIProvider):
                 image_size=len(image_data),
                 mime_type=mime_type,
             )
-            # Future: call self._model.generate_content_async with image
-            raise NotImplementedError(
-                "Image analysis will be implemented in the AI prompts phase."
+
+            image_part = {
+                "mime_type": mime_type,
+                "data": image_data,
+            }
+
+            generation_config = genai.types.GenerationConfig(
+                temperature=0.3,
+                max_output_tokens=4096,
+                response_mime_type="application/json",
             )
-        except NotImplementedError:
-            raise
+
+            response = await self._model.generate_content_async(
+                [prompt, image_part],
+                generation_config=generation_config,
+                request_options={"timeout": self._timeout},
+            )
+
+            response_text = response.text
+            parsed = self._parse_json_from_text(response_text)
+
+            usage = {}
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                usage = {
+                    "prompt_tokens": getattr(response.usage_metadata, "prompt_token_count", 0),
+                    "completion_tokens": getattr(response.usage_metadata, "candidates_token_count", 0),
+                    "total_tokens": getattr(response.usage_metadata, "total_token_count", 0),
+                }
+
+            logger.info(
+                "gemini_analyze_image_success",
+                model=self._model_name,
+                usage=usage,
+            )
+
+            return AIImageAnalysisResult(
+                description=parsed.get("description", ""),
+                labels=parsed.get("subjects", parsed.get("objects", [])),
+                metadata=parsed,
+                model=self._model_name,
+                usage=usage,
+            )
+
         except Exception as exc:
+            logger.error(
+                "gemini_analyze_image_failed",
+                model=self._model_name,
+                error=str(exc),
+            )
             raise AIProviderException(
                 detail=f"Gemini image analysis failed: {exc}",
                 context={"model": self._model_name},
@@ -77,22 +154,58 @@ class GeminiProvider(AIProvider):
         temperature: float = 0.7,
         max_tokens: int = 2048,
     ) -> AITextResult:
-        """Generate text via Gemini.
-
-        Note: Full implementation deferred to the AI prompts phase.
-        """
+        """Generate text via Gemini."""
         try:
             logger.info(
                 "gemini_generate_text",
                 model=self._model_name,
                 prompt_length=len(prompt),
             )
-            raise NotImplementedError(
-                "Text generation will be implemented in the AI prompts phase."
+
+            generation_config = genai.types.GenerationConfig(
+                temperature=temperature,
+                max_output_tokens=max_tokens,
             )
-        except NotImplementedError:
-            raise
+
+            # Build content parts
+            contents = []
+            if system_prompt:
+                contents.append(f"System: {system_prompt}\n\n")
+            contents.append(prompt)
+            full_prompt = "".join(contents)
+
+            response = await self._model.generate_content_async(
+                full_prompt,
+                generation_config=generation_config,
+                request_options={"timeout": self._timeout},
+            )
+
+            usage = {}
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                usage = {
+                    "prompt_tokens": getattr(response.usage_metadata, "prompt_token_count", 0),
+                    "completion_tokens": getattr(response.usage_metadata, "candidates_token_count", 0),
+                    "total_tokens": getattr(response.usage_metadata, "total_token_count", 0),
+                }
+
+            logger.info(
+                "gemini_generate_text_success",
+                model=self._model_name,
+                usage=usage,
+            )
+
+            return AITextResult(
+                text=response.text,
+                model=self._model_name,
+                usage=usage,
+            )
+
         except Exception as exc:
+            logger.error(
+                "gemini_generate_text_failed",
+                model=self._model_name,
+                error=str(exc),
+            )
             raise AIProviderException(
                 detail=f"Gemini text generation failed: {exc}",
                 context={"model": self._model_name},
@@ -106,22 +219,75 @@ class GeminiProvider(AIProvider):
         system_prompt: str | None = None,
         temperature: float = 0.3,
     ) -> AIStructuredResult:
-        """Generate structured JSON output via Gemini.
-
-        Note: Full implementation deferred to the AI prompts phase.
-        """
+        """Generate structured JSON output via Gemini."""
         try:
             logger.info(
                 "gemini_generate_structured",
                 model=self._model_name,
                 prompt_length=len(prompt),
             )
-            raise NotImplementedError(
-                "Structured generation will be implemented in the AI prompts phase."
+
+            generation_config = genai.types.GenerationConfig(
+                temperature=temperature,
+                max_output_tokens=4096,
+                response_mime_type="application/json",
             )
-        except NotImplementedError:
-            raise
+
+            # Build full prompt with schema instructions
+            schema_str = json.dumps(output_schema, indent=2)
+            full_prompt_parts = []
+            if system_prompt:
+                full_prompt_parts.append(f"System: {system_prompt}\n\n")
+            full_prompt_parts.append(prompt)
+            full_prompt_parts.append(
+                f"\n\nRespond with valid JSON matching this schema:\n{schema_str}"
+            )
+            full_prompt = "".join(full_prompt_parts)
+
+            response = await self._model.generate_content_async(
+                full_prompt,
+                generation_config=generation_config,
+                request_options={"timeout": self._timeout},
+            )
+
+            parsed = self._parse_json_from_text(response.text)
+
+            usage = {}
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                usage = {
+                    "prompt_tokens": getattr(response.usage_metadata, "prompt_token_count", 0),
+                    "completion_tokens": getattr(response.usage_metadata, "candidates_token_count", 0),
+                    "total_tokens": getattr(response.usage_metadata, "total_token_count", 0),
+                }
+
+            logger.info(
+                "gemini_generate_structured_success",
+                model=self._model_name,
+                usage=usage,
+            )
+
+            return AIStructuredResult(
+                data=parsed,
+                model=self._model_name,
+                usage=usage,
+            )
+
+        except json.JSONDecodeError as exc:
+            logger.error(
+                "gemini_json_parse_failed",
+                model=self._model_name,
+                error=str(exc),
+            )
+            raise AIProviderException(
+                detail=f"Gemini returned invalid JSON: {exc}",
+                context={"model": self._model_name},
+            ) from exc
         except Exception as exc:
+            logger.error(
+                "gemini_generate_structured_failed",
+                model=self._model_name,
+                error=str(exc),
+            )
             raise AIProviderException(
                 detail=f"Gemini structured generation failed: {exc}",
                 context={"model": self._model_name},
@@ -130,7 +296,6 @@ class GeminiProvider(AIProvider):
     async def health_check(self) -> bool:
         """Verify the Gemini API is reachable."""
         try:
-            # A lightweight model list call to verify the API key
             models = genai.list_models()
             return any(True for _ in models)
         except Exception as exc:

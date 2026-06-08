@@ -37,6 +37,7 @@ class ArtworkResponse(BaseModel):
     youtube_title: str | None = None
     youtube_description: str | None = None
     reel_path: str | None = None
+    reel_script: dict[str, Any] | None = None
     error_message: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -52,3 +53,40 @@ class ArtworkListResponse(BaseModel):
     page: int
     per_page: int
     pages: int
+
+
+class ArtworkAnalysisResponse(BaseModel):
+    """Artwork analysis data response."""
+
+    artwork_id: uuid.UUID
+    analysis_data: dict[str, Any] | None = None
+
+
+class ArtworkSEOResponse(BaseModel):
+    """Artwork SEO data response."""
+
+    artwork_id: uuid.UUID
+    seo_data: dict[str, Any] | None = None
+
+
+class ArtworkCaptionResponse(BaseModel):
+    """Artwork social media caption response."""
+
+    artwork_id: uuid.UUID
+    caption: str | None = None
+    youtube_title: str | None = None
+    youtube_description: str | None = None
+
+
+class ArtworkHashtagsResponse(BaseModel):
+    """Artwork hashtags response."""
+
+    artwork_id: uuid.UUID
+    hashtags: list[str] | None = None
+
+
+class ArtworkReelScriptResponse(BaseModel):
+    """Artwork reel script response."""
+
+    artwork_id: uuid.UUID
+    reel_script: dict[str, Any] | None = None

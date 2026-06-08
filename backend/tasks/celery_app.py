@@ -15,7 +15,13 @@ def create_celery_app() -> Celery:
     """
     settings = get_settings()
 
-    app = Celery("artwork_automation")
+    app = Celery(
+        "artwork_automation",
+        include=[
+            "backend.tasks.artwork_task",
+            "backend.tasks.workflow_task",
+        ],
+    )
 
     app.conf.update(
         # Broker & Backend

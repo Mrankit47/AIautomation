@@ -14,6 +14,34 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from backend.config.settings import get_settings
+
+# Module-level references for sync engine
+_sync_engine = None
+_SyncSessionLocal: sessionmaker | None = None
+
+
+def get_sync_session() -> Session:
+    """Create a sync database session using psycopg2."""
+    global _sync_engine, _SyncSessionLocal  # noqa: PLW0603
+
+    if _SyncSessionLocal is None:
+        settings = get_settings()
+        _sync_engine = create_engine(
+            settings.postgres.sync_url,
+            pool_size=5,
+            max_overflow=2,
+            pool_pre_ping=True,
+            echo=False,
+        )
+        _SyncSessionLocal = sessionmaker(
+            bind=_sync_engine,
+            class_=Session,
+            expire_on_commit=False,
+        )
+    return _SyncSessionLocal()
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator

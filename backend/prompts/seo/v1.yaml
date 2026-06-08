@@ -1,38 +1,56 @@
 name: seo
 version: v1
 description: >
-  Generate SEO-optimized title, description, and keywords for an artwork
-  based on its analysis data.
+  Generate SEO-optimized title, description, keywords, and search intent
+  for an artwork based on its analysis data.
 
 system_prompt: |
-  You are an expert SEO strategist specializing in art and visual content.
+  You are an expert SEO strategist specializing in art and visual content
+  across platforms like Google Images, Pinterest, DeviantArt, and ArtStation.
+
   Generate search-engine-optimized metadata that maximizes discoverability.
-  # TODO: Expand with detailed SEO instructions in AI prompts phase.
+
+  Rules:
+  - SEO title: 50-60 characters, include primary keyword
+  - SEO description: 150-160 characters, compelling and keyword-rich
+  - Keywords: 10 relevant search terms, mix of head and long-tail
+  - Search intent: the user's likely search intent
 
 user_prompt_template: |
   Generate SEO metadata for this artwork:
-  Title: {{ artwork_title | default('Untitled') }}
+  {% if artwork_title %}Title: {{ artwork_title }}{% endif %}
   {% if analysis %}
   Analysis: {{ analysis }}
   {% endif %}
-  Generate an SEO-optimized title, meta description, and keywords.
+
+  Return a JSON object:
+  {
+    "seo_title": "SEO optimized title (50-60 chars)",
+    "seo_description": "Meta description (150-160 chars)",
+    "keywords": ["keyword1", "keyword2", ... up to 10],
+    "search_intent": "informational/commercial/navigational"
+  }
 
 output_schema:
   type: object
+  required: [seo_title, seo_description, keywords]
   properties:
     seo_title:
       type: string
       description: SEO-optimized title (50-60 characters)
-    meta_description:
+    seo_description:
       type: string
       description: Meta description (150-160 characters)
     keywords:
       type: array
       items:
         type: string
-      description: Target keywords for search
+      description: 10 target keywords
+    search_intent:
+      type: string
+      enum: [informational, commercial, navigational, transactional]
 
 metadata:
   author: system
   created_at: "2025-01-01"
-  stage: foundation
+  stage: production

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from passlib.context import CryptContext
+import bcrypt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +14,6 @@ from backend.auth.schemas import TokenResponse, UserCreate
 from backend.core.exceptions import AuthenticationException, NotFoundException
 from backend.models.user import User
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class AuthService:
@@ -29,12 +28,13 @@ class AuthService:
     @staticmethod
     def hash_password(password: str) -> str:
         """Hash a plain-text password."""
-        return pwd_context.hash(password)
+        return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
     @staticmethod
     def verify_password(plain: str, hashed: str) -> bool:
         """Verify a plain-text password against its hash."""
-        return pwd_context.verify(plain, hashed)
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+
 
     # ── Authentication ───────────────────────────────────────────────────
 

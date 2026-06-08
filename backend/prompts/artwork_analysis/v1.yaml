@@ -2,50 +2,89 @@ name: artwork_analysis
 version: v1
 description: >
   Analyze an artwork image for style, medium, mood, subject matter,
-  color palette, and composition.  This prompt will be refined in the
-  AI prompts implementation phase.
+  color palette, composition, and category using Gemini vision.
 
 system_prompt: |
   You are an expert art analyst with deep knowledge of art history,
-  contemporary art, digital art, and visual design.  Analyze the
-  provided artwork image thoroughly.
-  # TODO: Expand with detailed analysis instructions in AI prompts phase.
+  contemporary art, digital art, anime, illustration, and visual design.
+
+  Analyze the provided artwork image thoroughly and return a JSON object
+  with the following structure. Be specific and detailed.
+
+  Rules:
+  - Identify the dominant art style (e.g., anime, impressionism, abstract,
+    photorealism, digital_art, pixel_art, watercolor, oil_painting)
+  - Detect the medium used (e.g., digital, oil on canvas, watercolor, pencil)
+  - Assess the overall mood/emotional tone
+  - List all identifiable subjects/objects in the image
+  - Identify the scene or setting
+  - Extract the dominant color palette (use color names)
+  - Analyze the composition technique
+  - Categorize the artwork
 
 user_prompt_template: |
-  Analyze this artwork: {{ artwork_title | default('Untitled') }}
-  {% if context %}
-  Additional context: {{ context }}
-  {% endif %}
-  Provide a comprehensive analysis covering style, medium, mood,
-  subject matter, color palette, and composition.
+  Analyze this artwork image in detail.
+  {% if artwork_title %}Title: {{ artwork_title }}{% endif %}
+
+  Return a JSON object with these exact fields:
+  {
+    "style": "primary art style",
+    "medium": "art medium used",
+    "mood": "emotional tone",
+    "emotional_tone": "detailed emotional description",
+    "primary_colors": ["color1", "color2", "color3"],
+    "objects": ["object1", "object2"],
+    "scene": "scene or setting description",
+    "category": "one of: digital_art, traditional_art, photography, anime, illustration, mixed_media",
+    "composition": "composition analysis",
+    "subjects": ["subject1", "subject2"],
+    "description": "one paragraph description of the artwork"
+  }
 
 output_schema:
   type: object
+  required: [style, mood, primary_colors, objects, category]
   properties:
     style:
       type: string
-      description: Art style (e.g., impressionism, abstract, digital)
+      description: Primary art style
     medium:
       type: string
-      description: Art medium (e.g., oil on canvas, digital, watercolor)
+      description: Art medium
     mood:
       type: string
-      description: Overall mood or emotional tone
+      description: Overall mood
+    emotional_tone:
+      type: string
+      description: Detailed emotional description
+    primary_colors:
+      type: array
+      items:
+        type: string
+      description: Dominant colors (3-5)
+    objects:
+      type: array
+      items:
+        type: string
+      description: Identifiable objects
+    scene:
+      type: string
+      description: Scene or setting
+    category:
+      type: string
+      enum: [digital_art, traditional_art, photography, anime, illustration, mixed_media]
+    composition:
+      type: string
+      description: Composition analysis
     subjects:
       type: array
       items:
         type: string
-      description: List of identified subjects
-    color_palette:
-      type: array
-      items:
-        type: string
-      description: Dominant colors
-    composition:
+    description:
       type: string
-      description: Composition analysis
+      description: One paragraph description
 
 metadata:
   author: system
   created_at: "2025-01-01"
-  stage: foundation
+  stage: production

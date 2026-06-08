@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.auth.dependencies import require_superuser
@@ -28,13 +29,17 @@ def _get_auth_service(
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
-    body: LoginRequest,
+    form_data: OAuth2PasswordRequestForm = Depends(),
     auth_service: AuthService = Depends(_get_auth_service),
 ) -> TokenResponse:
-    """Authenticate and return JWT token pair."""
+    """Authenticate and return JWT token pair.
+
+    Accepts OAuth2 form data (``username`` = email, ``password``).
+    """
     return await auth_service.authenticate_user(
-        email=body.email, password=body.password
+        email=form_data.username, password=form_data.password
     )
+
 
 
 @router.post("/refresh", response_model=TokenResponse)

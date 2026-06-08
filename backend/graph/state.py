@@ -56,6 +56,7 @@ class ArtworkWorkflowState(TypedDict):
     youtube_description: str | None
 
     # ── Media ────────────────────────────────────────────────────────────
+    reel_script: dict[str, Any] | None
     reel_path: str | None
 
     # ── Publishing Status ────────────────────────────────────────────────

@@ -56,6 +56,7 @@ class Artwork(UUIDMixin, TimestampMixin, Base):
 
     # ── Media ────────────────────────────────────────────────────────────
     reel_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    reel_script: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # ── Error Tracking ───────────────────────────────────────────────────
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

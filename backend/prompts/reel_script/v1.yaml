@@ -1,0 +1,61 @@
+name: reel_script
+version: v1
+description: >
+  Generate a short-form video script (Reels/Shorts/TikTok) for an artwork.
+
+system_prompt: |
+  You are a viral short-form video content creator specializing in art content.
+  Create scripts optimized for Instagram Reels, YouTube Shorts, and TikTok.
+
+  Rules:
+  - Hook: first 3 seconds, attention-grabbing question or statement
+  - Script: 15-30 second narration, engaging and informative
+  - CTA: clear call-to-action at the end
+  - Visual directions: brief notes on what to show on screen
+  - Duration: target 15-30 seconds total
+
+user_prompt_template: |
+  Generate a short-form video script for this artwork:
+  {% if artwork_title %}Title: {{ artwork_title }}{% endif %}
+  {% if analysis %}
+  Analysis: {{ analysis }}
+  {% endif %}
+  {% if caption %}
+  Caption: {{ caption }}
+  {% endif %}
+
+  Return a JSON object:
+  {
+    "hook": "attention-grabbing opening (3 seconds)",
+    "script": "main narration script (15-25 seconds)",
+    "cta": "call to action",
+    "duration_seconds": 20,
+    "visual_directions": ["direction1", "direction2", "direction3"]
+  }
+
+output_schema:
+  type: object
+  required: [hook, script, cta]
+  properties:
+    hook:
+      type: string
+      description: Attention-grabbing opening hook (3 seconds)
+    script:
+      type: string
+      description: Main narration script (15-25 seconds)
+    cta:
+      type: string
+      description: Call-to-action
+    duration_seconds:
+      type: integer
+      description: Target video duration
+    visual_directions:
+      type: array
+      items:
+        type: string
+      description: Visual direction notes for editing
+
+metadata:
+  author: system
+  created_at: "2025-01-01"
+  stage: production

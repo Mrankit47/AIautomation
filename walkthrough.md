@@ -1,12 +1,12 @@
 # AI Artwork Publishing Automation Platform — Walkthrough
 
-We have successfully established the production-grade foundation and architecture for the platform. Below is the summary of the implemented files, configurations, scripts, and tests.
+We have successfully established the production-grade foundation, architecture, and the complete AI processing pipeline for the platform. Below is the summary of the implemented files, configurations, scripts, and tests.
 
 ---
 
 ## 📂 Implemented Codebase & Directory Structure
 
-Here is a visual map of the architecture components created or finalized:
+Here is a visual map of the architecture components:
 
 ```
 AIautomation/
@@ -14,28 +14,30 @@ AIautomation/
 │   ├── api/                     # API Routers and Route Protected Endpoints
 │   │   ├── deps.py              # Dependency Injections
 │   │   └── router.py            # API Route aggregator
+│   ├── agents/                  # AI agents (ArtworkAnalyzer, SEO, Caption, Hashtag, ReelScript)
 │   ├── auth/                    # JWT Authentication logic & schemas
 │   ├── config/                  # Isolated Settings Management (settings.py)
 │   ├── core/                    # Core middleware, events, and exceptions
 │   ├── database/                # SQLAlchemy session & repository base
+│   │   └── session.py           # Sync/async DB session setup
 │   ├── feature_flags/           # Feature flag controllers
+│   ├── graph/                   # LangGraph workflow definitions
+│   │   ├── nodes.py             # Workflow node runners (DB persistent)
+│   │   ├── state.py             # Typed Graph State
+│   │   └── workflow.py          # StateGraph assembly
 │   ├── models/                  # DB models (Artwork, User, WorkflowRun)
-│   │   └── __init__.py          # Exported base structures
-│   ├── prompts/                 # Yaml based externalized prompts
-│   ├── providers/               # Gemini API wrapper
+│   ├── prompts/                 # YAML-based externalized prompts
+│   ├── providers/               # Gemini API wrapper (gemini.py)
 │   ├── services/                # Business logic layer
 │   ├── tasks/                   # Celery tasks (process_artwork, execute_workflow)
 │   └── workflows/               # Versioned pipelines (v1, v2)
 ├── alembic/                     # Database migrations
 │   ├── env.py                   # Async database migration configuration
-│   └── script.py.mako           # Migration script template
+│   └── versions/                # Generated database migration scripts
 ├── docker/                      # Containerization files
 │   ├── Dockerfile               # Production multi-stage Docker build
 │   └── Dockerfile.dev           # Development Docker build
 ├── scripts/                     # Startup & environment control scripts
-│   ├── dev.sh                   # Dev environment runner (hot reload)
-│   ├── start.sh                 # Production environment runner
-│   └── start_celery.sh          # Celery worker process runner
 ├── tests/                       # Testing suite
 │   ├── conftest.py              # Pytest async and mocking fixtures
 │   ├── unit/                    # Unit tests (health, jwt, prompt registry)
@@ -53,23 +55,59 @@ AIautomation/
 ### 1. Database Migrations (Alembic)
 *   **[alembic.ini](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/alembic.ini)**: Fully configured Alembic configuration with correct system path configuration.
 *   **[alembic/env.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/alembic/env.py)**: Async-compatible migrations environment that extracts config variables from our unified setting registry.
-*   **[alembic/script.py.mako](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/alembic/script.py.mako)**: Clean, typing-safe python template for creating auto-migrations.
+*   **[alembic/versions/e04218e7bbac_add_reel_script.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/alembic/versions/e04218e7bbac_add_reel_script.py)**: Auto-generated migration script adding `reel_script` JSON column to the `artworks` table.
 
-### 2. Local Configuration
+### 2. Local Configuration & Docker Networking
 *   **[.env](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/.env)**: Configured local development variables with mock credentials, fallback values, and support for flat and double-underscore Pydantic settings.
+*   **Docker networking**: Solved communication errors so containers use DNS service names (`postgres` and `redis`) while local scripts fall back to `localhost`.
 
-### 3. Containerization & Orchestration
-*   **[docker-compose.yml](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/docker-compose.yml)** & **[docker-compose.dev.yml](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/docker-compose.dev.yml)**: Composition scripts targeting Postgres, Redis, Celery Workers, Flower (for monitoring) and FastAPI app servers.
-*   **[docker/Dockerfile](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/docker/Dockerfile)** & **[docker/Dockerfile.dev](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/docker/Dockerfile.dev)**: Optimized Docker builds supporting multi-stage builds (production) and git tools integration (development).
+### 3. CLI Seeding
+*   **Superuser Seeding CLI**: Allows bootstrapping the primary superuser to bypass registration locks via:
+    ```bash
+    docker exec artwork-app python -m backend.cli.create_superuser
+    ```
 
-### 4. Runner Scripts
-*   **[scripts/start.sh](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/scripts/start.sh)**: Executable run command for starting production builds.
-*   **[scripts/dev.sh](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/scripts/dev.sh)**: Executable command for hot-reloading development servers.
-*   **[scripts/start_celery.sh](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/scripts/start_celery.sh)**: Startup configuration for the asynchronous Celery processing node.
+---
 
-### 5. Automated Test Framework
-*   **[tests/conftest.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/tests/conftest.py)**: Async client wrappers, mock database session bindings, mock Redis structures, and auto-mocked Celery tasks.
-*   **[tests/unit/test_health.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/tests/unit/test_health.py)**: Asserts correct JSON outputs for liveness and readiness health checks.
-*   **[tests/unit/test_jwt.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/tests/unit/test_jwt.py)**: Validates token pair generation, claim payloads, signature verification, and expired token security exceptions.
-*   **[tests/unit/test_prompt_registry.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/tests/unit/test_prompt_registry.py)**: Tests file-system directory scans, YAML template loads, rendering engines (Jinja2), and failure bounds.
-*   **[tests/integration/test_artwork_workflow.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/tests/integration/test_artwork_workflow.py)**: Asserts the end-to-end API upload and workflow trigger routes require and successfully process authenticated JWT token headers.
+## 🤖 AI Pipeline & LangGraph Workflow Integration
+
+We have fully replaced all workflow stubs with a production-grade AI Artwork Automation Pipeline:
+
+### 1. LangGraph State & Schema Extension
+*   **State extension**: Added the `reel_script` schema definition to [state.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/graph/state.py) to flow the generated short-form video script content through the processing DAG.
+*   **Artwork Model update**: Added the `reel_script` JSON field to the database model in [artwork.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/models/artwork.py).
+
+### 2. DB Persistent Graph Nodes
+*   Reimplemented [nodes.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/graph/nodes.py) to:
+    1.  Transition the active `WorkflowRun` stage by updating `current_node` in the DB.
+    2.  Instantiate and run the respective AI agent (`ArtworkAnalyzerAgent`, `MetadataGeneratorAgent`, `SEOAgent`, `CaptionAgent`, `HashtagAgent`, `ReelScriptAgent`).
+    3.  Persist the agent output directly to the underlying `artworks` table using a centralized synchronous database helper (`get_sync_session`) to bypass Celery-asyncpg limits.
+
+### 3. Celery Integration
+*   Updated the celery task `execute_workflow` in [workflow_task.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/tasks/workflow_task.py) to:
+    1.  Load the target artwork details.
+    2.  Compile and execute the LangGraph pipeline asynchronously using `asyncio.run()`.
+    3.  Commit results to the `WorkflowRun` record as `COMPLETED` on success or log and track failure details if any node crashes.
+
+### 4. API Sub-resource GET Routes
+We implemented 5 new GET sub-resource endpoints under `/api/v1/artworks/{id}` in [artwork.py (API)](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/api/v1/artwork.py) to query individual pipeline metrics:
+*   `GET /api/v1/artworks/{id}/analysis` -> returns analyzed art style, colors, composition.
+*   `GET /api/v1/artworks/{id}/seo` -> returns generated SEO titles, descriptions, keywords.
+*   `GET /api/v1/artworks/{id}/caption` -> returns platform-specific social descriptions.
+*   `GET /api/v1/artworks/{id}/hashtags` -> returns targeted volume/niche tags.
+*   `GET /api/v1/artworks/{id}/reel` -> returns short-form video hooks & visual scripts.
+
+---
+
+## 🧪 Verification & Test Results
+
+### 1. Database Schema Status
+The migration `e04218e7bbac` was successfully created and applied inside the PostgreSQL database container.
+
+### 2. Local Python Test Suite
+We added 5 new integration tests in [test_artwork_workflow.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/tests/integration/test_artwork_workflow.py) asserting correct retrieval behavior and HTTP 200/401/404 bounds for all new sub-resource endpoints.
+
+All **19 tests** passed successfully:
+```
+============================= 19 passed in 1.96s ==============================
+```

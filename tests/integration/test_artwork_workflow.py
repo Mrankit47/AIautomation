@@ -142,3 +142,206 @@ async def test_trigger_workflow_api(
     assert response.status_code == 202
     assert response.json()["status"] == "pending"
     assert "celery_task_id" in response.json()
+
+
+@pytest.mark.asyncio
+async def test_get_analysis_api(
+    client: AsyncClient,
+    mock_db_session: AsyncSession,
+    auth_headers: dict[str, str],
+) -> None:
+    """Test retrieving artwork analysis data via API."""
+    mock_user = User(
+        id=uuid.uuid4(),
+        email="test@example.com",
+        hashed_password="hashed",
+        is_active=True,
+        is_superuser=True,
+    )
+    mock_db_session.get = AsyncMock(return_value=mock_user)
+
+    artwork_id = uuid.uuid4()
+    mock_artwork = Artwork(
+        id=artwork_id,
+        title="Sunset Title",
+        original_filename="sunset.png",
+        file_path="artworks/sunset.png",
+        file_size=100,
+        mime_type="image/png",
+        status=ArtworkStatus.PROCESSING,
+        analysis_data={"style": "Impressionism", "mood": "calm"},
+    )
+
+    from backend.database.repository import BaseRepository
+    BaseRepository.get_by_id = AsyncMock(return_value=mock_artwork)
+
+    response = await client.get(
+        f"/api/v1/artworks/{artwork_id}/analysis",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["analysis_data"]["style"] == "Impressionism"
+
+
+@pytest.mark.asyncio
+async def test_get_seo_api(
+    client: AsyncClient,
+    mock_db_session: AsyncSession,
+    auth_headers: dict[str, str],
+) -> None:
+    """Test retrieving artwork SEO data via API."""
+    mock_user = User(
+        id=uuid.uuid4(),
+        email="test@example.com",
+        hashed_password="hashed",
+        is_active=True,
+        is_superuser=True,
+    )
+    mock_db_session.get = AsyncMock(return_value=mock_user)
+
+    artwork_id = uuid.uuid4()
+    mock_artwork = Artwork(
+        id=artwork_id,
+        title="Sunset Title",
+        original_filename="sunset.png",
+        file_path="artworks/sunset.png",
+        file_size=100,
+        mime_type="image/png",
+        status=ArtworkStatus.PROCESSING,
+        seo_data={"seo_title": "Optimized Title", "keywords": ["sunset"]},
+    )
+
+    from backend.database.repository import BaseRepository
+    BaseRepository.get_by_id = AsyncMock(return_value=mock_artwork)
+
+    response = await client.get(
+        f"/api/v1/artworks/{artwork_id}/seo",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["seo_data"]["seo_title"] == "Optimized Title"
+
+
+@pytest.mark.asyncio
+async def test_get_caption_api(
+    client: AsyncClient,
+    mock_db_session: AsyncSession,
+    auth_headers: dict[str, str],
+) -> None:
+    """Test retrieving artwork caption via API."""
+    mock_user = User(
+        id=uuid.uuid4(),
+        email="test@example.com",
+        hashed_password="hashed",
+        is_active=True,
+        is_superuser=True,
+    )
+    mock_db_session.get = AsyncMock(return_value=mock_user)
+
+    artwork_id = uuid.uuid4()
+    mock_artwork = Artwork(
+        id=artwork_id,
+        title="Sunset Title",
+        original_filename="sunset.png",
+        file_path="artworks/sunset.png",
+        file_size=100,
+        mime_type="image/png",
+        status=ArtworkStatus.PROCESSING,
+        caption="A beautiful sunset",
+        youtube_title="Sunset Youtube Title",
+        youtube_description="Sunset Youtube Description",
+    )
+
+    from backend.database.repository import BaseRepository
+    BaseRepository.get_by_id = AsyncMock(return_value=mock_artwork)
+
+    response = await client.get(
+        f"/api/v1/artworks/{artwork_id}/caption",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["caption"] == "A beautiful sunset"
+    assert response.json()["youtube_title"] == "Sunset Youtube Title"
+
+
+@pytest.mark.asyncio
+async def test_get_hashtags_api(
+    client: AsyncClient,
+    mock_db_session: AsyncSession,
+    auth_headers: dict[str, str],
+) -> None:
+    """Test retrieving artwork hashtags via API."""
+    mock_user = User(
+        id=uuid.uuid4(),
+        email="test@example.com",
+        hashed_password="hashed",
+        is_active=True,
+        is_superuser=True,
+    )
+    mock_db_session.get = AsyncMock(return_value=mock_user)
+
+    artwork_id = uuid.uuid4()
+    mock_artwork = Artwork(
+        id=artwork_id,
+        title="Sunset Title",
+        original_filename="sunset.png",
+        file_path="artworks/sunset.png",
+        file_size=100,
+        mime_type="image/png",
+        status=ArtworkStatus.PROCESSING,
+        hashtags=["sunset", "art"],
+    )
+
+    from backend.database.repository import BaseRepository
+    BaseRepository.get_by_id = AsyncMock(return_value=mock_artwork)
+
+    response = await client.get(
+        f"/api/v1/artworks/{artwork_id}/hashtags",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["hashtags"] == ["sunset", "art"]
+
+
+@pytest.mark.asyncio
+async def test_get_reel_api(
+    client: AsyncClient,
+    mock_db_session: AsyncSession,
+    auth_headers: dict[str, str],
+) -> None:
+    """Test retrieving artwork reel script via API."""
+    mock_user = User(
+        id=uuid.uuid4(),
+        email="test@example.com",
+        hashed_password="hashed",
+        is_active=True,
+        is_superuser=True,
+    )
+    mock_db_session.get = AsyncMock(return_value=mock_user)
+
+    artwork_id = uuid.uuid4()
+    mock_artwork = Artwork(
+        id=artwork_id,
+        title="Sunset Title",
+        original_filename="sunset.png",
+        file_path="artworks/sunset.png",
+        file_size=100,
+        mime_type="image/png",
+        status=ArtworkStatus.PROCESSING,
+        reel_script={"hook": "Watch this!", "script": "narration"},
+    )
+
+    from backend.database.repository import BaseRepository
+    BaseRepository.get_by_id = AsyncMock(return_value=mock_artwork)
+
+    response = await client.get(
+        f"/api/v1/artworks/{artwork_id}/reel",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reel_script"]["hook"] == "Watch this!"

@@ -9,7 +9,15 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 from backend.api.deps import get_artwork_service, get_workflow_service
 from backend.auth.dependencies import get_current_active_user
 from backend.models.user import User
-from backend.schemas.artwork import ArtworkListResponse, ArtworkResponse
+from backend.schemas.artwork import (
+    ArtworkAnalysisResponse,
+    ArtworkCaptionResponse,
+    ArtworkHashtagsResponse,
+    ArtworkListResponse,
+    ArtworkReelScriptResponse,
+    ArtworkResponse,
+    ArtworkSEOResponse,
+)
 from backend.schemas.workflow import (
     WorkflowStatusResponse,
     WorkflowTriggerRequest,
@@ -93,3 +101,53 @@ async def get_workflow_status(
 ) -> WorkflowStatusResponse:
     """Get the status of a specific workflow run."""
     return await workflow_service.get_workflow_status(workflow_run_id)
+
+
+@router.get("/{artwork_id}/analysis", response_model=ArtworkAnalysisResponse)
+async def get_artwork_analysis(
+    artwork_id: uuid.UUID,
+    service: ArtworkService = Depends(get_artwork_service),
+    current_user: User = Depends(get_current_active_user),
+) -> ArtworkAnalysisResponse:
+    """Retrieve artwork analysis results."""
+    return await service.get_analysis(artwork_id)
+
+
+@router.get("/{artwork_id}/seo", response_model=ArtworkSEOResponse)
+async def get_artwork_seo(
+    artwork_id: uuid.UUID,
+    service: ArtworkService = Depends(get_artwork_service),
+    current_user: User = Depends(get_current_active_user),
+) -> ArtworkSEOResponse:
+    """Retrieve artwork SEO-optimized metadata."""
+    return await service.get_seo(artwork_id)
+
+
+@router.get("/{artwork_id}/caption", response_model=ArtworkCaptionResponse)
+async def get_artwork_caption(
+    artwork_id: uuid.UUID,
+    service: ArtworkService = Depends(get_artwork_service),
+    current_user: User = Depends(get_current_active_user),
+) -> ArtworkCaptionResponse:
+    """Retrieve artwork platform captions and titles."""
+    return await service.get_caption(artwork_id)
+
+
+@router.get("/{artwork_id}/hashtags", response_model=ArtworkHashtagsResponse)
+async def get_artwork_hashtags(
+    artwork_id: uuid.UUID,
+    service: ArtworkService = Depends(get_artwork_service),
+    current_user: User = Depends(get_current_active_user),
+) -> ArtworkHashtagsResponse:
+    """Retrieve artwork hashtags."""
+    return await service.get_hashtags(artwork_id)
+
+
+@router.get("/{artwork_id}/reel", response_model=ArtworkReelScriptResponse)
+async def get_artwork_reel(
+    artwork_id: uuid.UUID,
+    service: ArtworkService = Depends(get_artwork_service),
+    current_user: User = Depends(get_current_active_user),
+) -> ArtworkReelScriptResponse:
+    """Retrieve artwork reel video script."""
+    return await service.get_reel_script(artwork_id)
