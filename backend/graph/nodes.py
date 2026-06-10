@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+import os
 from backend.agents.artwork_analyzer import ArtworkAnalyzerAgent
 from backend.agents.caption_agent import CaptionAgent
 from backend.agents.hashtag_agent import HashtagAgent
@@ -19,6 +20,7 @@ from backend.agents.reel_script_agent import ReelScriptAgent
 from backend.agents.seo_agent import SEOAgent
 from backend.core.logging import get_logger
 from backend.graph.state import ArtworkWorkflowState
+from backend.services.reel_generator import ReelGenerator
 
 logger = get_logger(__name__)
 
@@ -342,6 +344,9 @@ async def generate_reel(state: ArtworkWorkflowState) -> dict[str, Any]:
     logger.info("node_execute", node="generate_reel", artwork_id=artwork_id)
     _update_run_node(workflow_id, "generate_reel")
 
+    # Structured logging for start
+    logger.info("reel_script_start", artwork_id=artwork_id, workflow_id=workflow_id)
+
     try:
         agent = ReelScriptAgent()
         context = {
@@ -353,13 +358,57 @@ async def generate_reel(state: ArtworkWorkflowState) -> dict[str, Any]:
         if not result.success:
             raise RuntimeError(result.error or "Reel script agent failed.")
 
-        _update_artwork_multiple_fields(artwork_id, {"reel_script": result.data})
+        # Real reel rendering instead of simulated path
+        logger.info("reel_render_started", artwork_id=artwork_id, workflow_id=workflow_id)
+
+        output_dir = "/app/outputs/reels"
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+
+        output_path = os.path.join(output_dir, f"{artwork_id}.mp4")
+
+        try:
+            generator = ReelGenerator()
+            reel_path = generator.generate_reel(
+                image_path=state["image_path"],
+                output_path=output_path,
+                reel_script=result.data,
+            )
+            logger.info("reel_render_completed", artwork_id=artwork_id, workflow_id=workflow_id, reel_path=reel_path)
+        except Exception as render_exc:
+            logger.error("reel_render_failed", artwork_id=artwork_id, workflow_id=workflow_id, error=str(render_exc))
+            raise render_exc
+
+        _update_artwork_multiple_fields(
+            artwork_id,
+            {
+                "reel_script": result.data,
+                "reel_path": reel_path,
+            }
+        )
+
+        # Structured logging for success
+        logger.info(
+            "reel_script_success",
+            artwork_id=artwork_id,
+            workflow_id=workflow_id,
+            execution_time_ms=result.execution_time_ms,
+        )
 
         return {
             "reel_script": result.data,
+            "reel_path": reel_path,
             "current_node": "generate_reel",
         }
     except Exception as exc:
+        # Structured logging for failure
+        logger.error(
+            "reel_script_failure",
+            artwork_id=artwork_id,
+            workflow_id=workflow_id,
+            error=str(exc),
+        )
+
         err = _make_error("generate_reel", exc)
         _update_run_node(workflow_id, "generate_reel", status="failed", error_history=[err])
         return {

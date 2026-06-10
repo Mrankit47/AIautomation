@@ -26,6 +26,8 @@ ENV PATH=/root/.local/bin:$PATH
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
+    ffmpeg \
+    fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /root/.local /root/.local

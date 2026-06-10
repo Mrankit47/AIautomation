@@ -248,6 +248,7 @@ def execute_workflow(
             "caption": final_state.get("caption"),
             "hashtags": final_state.get("hashtags"),
             "reel_script": final_state.get("reel_script"),
+            "reel_path": final_state.get("reel_path"),
         }
 
         _mark_completed(run_uuid, result_data)
