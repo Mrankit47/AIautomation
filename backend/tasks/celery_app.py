@@ -20,6 +20,7 @@ def create_celery_app() -> Celery:
         include=[
             "backend.tasks.artwork_task",
             "backend.tasks.workflow_task",
+            "backend.tasks.analytics_task",
         ],
     )
 
@@ -43,9 +44,17 @@ def create_celery_app() -> Celery:
         task_routes={
             "backend.tasks.artwork_task.*": {"queue": "artwork"},
             "backend.tasks.workflow_task.*": {"queue": "workflow"},
+            "backend.tasks.analytics_task.*": {"queue": "workflow"},
         },
         # Default queue
         task_default_queue="default",
+        # Celery Beat Periodic Schedule
+        beat_schedule={
+            "collect-analytics-daily": {
+                "task": "backend.tasks.analytics_task.collect_analytics_daily",
+                "schedule": 86400.0,  # Run every 24 hours (daily)
+            }
+        },
     )
 
     # Auto-discover tasks in the backend.tasks package

@@ -39,42 +39,54 @@ def _should_generate_reel(state: ArtworkWorkflowState) -> str:
     settings = get_settings()
     if settings.feature_flags.enable_reel_generation:
         return "generate_reel"
-    return "skip_reel"
+    
+    # Skip reel and route to next active node
+    if settings.feature_flags.enable_instagram_publish:
+        return "publish_instagram"
+    if settings.feature_flags.enable_youtube_publish:
+        return "publish_youtube"
+    if settings.feature_flags.enable_analytics_collection:
+        return "collect_analytics"
+    return "end"
 
 
-def _should_publish_instagram(state: ArtworkWorkflowState) -> str:
+def _after_reel(state: ArtworkWorkflowState) -> str:
+    """Router: determine where to go after reel node."""
+    if state.get("workflow_status") == "failed":
+        return "handle_error"
+    
     settings = get_settings()
     if settings.feature_flags.enable_instagram_publish:
         return "publish_instagram"
-    return "skip_instagram"
+    if settings.feature_flags.enable_youtube_publish:
+        return "publish_youtube"
+    if settings.feature_flags.enable_analytics_collection:
+        return "collect_analytics"
+    return "end"
 
 
-def _should_publish_youtube(state: ArtworkWorkflowState) -> str:
+def _after_publish_instagram(state: ArtworkWorkflowState) -> str:
+    """Router: determine where to go after Instagram publishing."""
+    if state.get("workflow_status") == "failed":
+        return "handle_error"
+    
     settings = get_settings()
     if settings.feature_flags.enable_youtube_publish:
         return "publish_youtube"
-    return "skip_youtube"
+    if settings.feature_flags.enable_analytics_collection:
+        return "collect_analytics"
+    return "end"
 
 
-def _should_publish_pinterest(state: ArtworkWorkflowState) -> str:
-    settings = get_settings()
-    if settings.feature_flags.enable_pinterest_publish:
-        return "publish_pinterest"
-    return "skip_pinterest"
-
-
-def _should_publish_tiktok(state: ArtworkWorkflowState) -> str:
-    settings = get_settings()
-    if settings.feature_flags.enable_tiktok_publish:
-        return "publish_tiktok"
-    return "skip_tiktok"
-
-
-def _should_collect_analytics(state: ArtworkWorkflowState) -> str:
+def _after_publish_youtube(state: ArtworkWorkflowState) -> str:
+    """Router: determine where to go after YouTube publishing."""
+    if state.get("workflow_status") == "failed":
+        return "handle_error"
+    
     settings = get_settings()
     if settings.feature_flags.enable_analytics_collection:
         return "collect_analytics"
-    return "skip_analytics"
+    return "end"
 
 
 def build_artwork_workflow() -> StateGraph:
@@ -83,8 +95,7 @@ def build_artwork_workflow() -> StateGraph:
     Pipeline:
         analyze → metadata → seo → caption → hashtags
         → reel (conditional) → publish_instagram (conditional)
-        → publish_youtube (conditional) → publish_pinterest (conditional)
-        → publish_tiktok (conditional) → collect_analytics (conditional) → END
+        → publish_youtube (conditional) → collect_analytics (conditional) → END
 
         Any node failure → handle_error → END
     """
@@ -99,8 +110,6 @@ def build_artwork_workflow() -> StateGraph:
     graph.add_node("generate_reel", generate_reel)
     graph.add_node("publish_instagram", publish_instagram)
     graph.add_node("publish_youtube", publish_youtube)
-    graph.add_node("publish_pinterest", publish_pinterest)
-    graph.add_node("publish_tiktok", publish_tiktok)
     graph.add_node("collect_analytics", collect_analytics)
     graph.add_node("handle_error", handle_error)
 
@@ -133,34 +142,45 @@ def build_artwork_workflow() -> StateGraph:
     graph.add_conditional_edges(
         "generate_hashtags",
         _should_generate_reel,
-        {"generate_reel": "generate_reel", "skip_reel": "publish_instagram"},
+        {
+            "generate_reel": "generate_reel",
+            "publish_instagram": "publish_instagram",
+            "publish_youtube": "publish_youtube",
+            "collect_analytics": "collect_analytics",
+            "end": END,
+        },
     )
     graph.add_conditional_edges(
         "generate_reel",
-        _should_continue,
-        {"continue": "publish_instagram", "handle_error": "handle_error"},
+        _after_reel,
+        {
+            "publish_instagram": "publish_instagram",
+            "publish_youtube": "publish_youtube",
+            "collect_analytics": "collect_analytics",
+            "end": END,
+            "handle_error": "handle_error",
+        },
     )
 
     # ── Publishing (feature-flagged per platform) ────────────────────────
     graph.add_conditional_edges(
         "publish_instagram",
-        _should_publish_youtube,
-        {"publish_youtube": "publish_youtube", "skip_youtube": "publish_pinterest"},
+        _after_publish_instagram,
+        {
+            "publish_youtube": "publish_youtube",
+            "collect_analytics": "collect_analytics",
+            "end": END,
+            "handle_error": "handle_error",
+        },
     )
     graph.add_conditional_edges(
         "publish_youtube",
-        _should_publish_pinterest,
-        {"publish_pinterest": "publish_pinterest", "skip_pinterest": "publish_tiktok"},
-    )
-    graph.add_conditional_edges(
-        "publish_pinterest",
-        _should_publish_tiktok,
-        {"publish_tiktok": "publish_tiktok", "skip_tiktok": "collect_analytics"},
-    )
-    graph.add_conditional_edges(
-        "publish_tiktok",
-        _should_collect_analytics,
-        {"collect_analytics": "collect_analytics", "skip_analytics": END},
+        _after_publish_youtube,
+        {
+            "collect_analytics": "collect_analytics",
+            "end": END,
+            "handle_error": "handle_error",
+        },
     )
 
     # ── Analytics ────────────────────────────────────────────────────────

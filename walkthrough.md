@@ -1,108 +1,99 @@
-# AI Artwork Publishing Automation Platform — Walkthrough
+# Integration Walkthrough: Auto Publishing Pipeline (Instagram & YouTube Shorts)
 
-We have successfully established the production-grade foundation, architecture, the complete AI processing pipeline, and the **real vertical video (Reel) generation** for the platform. Below is the summary of the implemented files, configurations, scripts, and tests.
-
----
-
-## 📂 Implemented Codebase & Directory Structure
-
-Here is a visual map of the architecture components:
-
-```
-AIautomation/
-├── backend/
-│   ├── api/                     # API Routers and Route Protected Endpoints
-│   │   ├── deps.py              # Dependency Injections
-│   │   └── router.py            # API Route aggregator
-│   ├── agents/                  # AI agents (ArtworkAnalyzer, SEO, Caption, Hashtag, ReelScript)
-│   ├── auth/                    # JWT Authentication logic & schemas
-│   ├── config/                  # Isolated Settings Management (settings.py)
-│   ├── core/                    # Core middleware, events, and exceptions
-│   ├── database/                # SQLAlchemy session & repository base
-│   │   └── session.py           # Sync/async DB session setup
-│   ├── feature_flags/           # Feature flag controllers
-│   ├── graph/                   # LangGraph workflow definitions
-│   │   ├── nodes.py             # Workflow node runners (DB persistent)
-│   │   ├── state.py             # Typed Graph State
-│   │   └── workflow.py          # StateGraph assembly
-│   ├── models/                  # DB models (Artwork, User, WorkflowRun)
-│   ├── prompts/                 # YAML-based externalized prompts
-│   ├── providers/               # Gemini API wrapper (gemini.py)
-│   ├── services/                # Business logic layer
-│   │   └── reel_generator.py    # Real MP4 video compiler (MoviePy)
-│   ├── tasks/                   # Celery tasks (process_artwork, execute_workflow)
-│   └── workflows/               # Versioned pipelines (v1, v2)
-├── alembic/                     # Database migrations
-│   ├── env.py                   # Async database migration configuration
-│   └── versions/                # Generated database migration scripts
-├── docker/                      # Containerization files
-│   ├── Dockerfile               # Production multi-stage Docker build
-│   └── Dockerfile.dev           # Development Docker build
-├── scripts/                     # Startup & environment control scripts
-├── tests/                       # Testing suite
-│   ├── conftest.py              # Pytest async and mocking fixtures
-│   ├── unit/                    # Unit tests (health, jwt, prompt registry)
-│   ├── integration/             # Integration tests (artwork workflow)
-│   └── verify_reel_generator.py # E2E video compiler verification script
-├── .env                         # Local environment settings
-├── alembic.ini                  # Alembic DB migration configuration
-├── docker-compose.yml           # Production multi-container composition
-└── docker-compose.dev.yml       # Development multi-container composition
-```
+This document walks through the complete implementation of the publishing integrations in the AI Artwork Automation pipeline.
 
 ---
 
-## 📽️ Real Video Reel Generation Integration
+## Completed Implementations
 
-We have fully replaced the simulated path placeholder logic with a real vertical MP4 video compilation service powered by MoviePy and FFmpeg:
+### 1. Database Schema Updates
+We added columns to the `Artwork` model in [artwork.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/models/artwork.py) to persist publishing states for both platforms:
+- **Instagram Tracking**:
+  - `instagram_status` (`pending`, `processing`, `published`, `failed`)
+  - `instagram_post_id` (Unique Instagram Media Container ID)
+  - `instagram_permalink` (Direct view URL of the published post)
+  - `instagram_published_at` (Timestamp of publication)
+- **YouTube Shorts Tracking**:
+  - `youtube_status` (`pending`, `processing`, `published`, `failed`)
+  - `youtube_video_id` (YouTube Video ID)
+  - `youtube_url` (Public Shorts URL: `https://youtube.com/shorts/{video_id}`)
+  - `youtube_published_at` (Timestamp of publication)
 
-### 1. System & Python Dependencies
-*   **Apt Packages**: Added `ffmpeg` (for video compilation) and `fonts-dejavu-core` (for rendering text labels) to both [Dockerfile](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/docker/Dockerfile) and [Dockerfile.dev](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/docker/Dockerfile.dev).
-*   **Python Packages**: Added `moviepy>=1.0.3` to [requirements.txt](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/requirements.txt) (compatible with MoviePy v2.x imported namespaces).
-
-### 2. ReelGenerator Service
-Implemented [reel_generator.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/services/reel_generator.py) containing:
-*   **Dimensions & Frame Rate**: Crops and resizes arbitrary images to fit vertical 9:16 resolution (1080x1920) rendering at 24fps.
-*   **Animation Effects**: Natively computes frame translations creating a slow Ken Burns zoom (100% to 112%) combined with a slow directional camera pan.
-*   **Dynamic Overlays**: Renders white text labels on dark semi-transparent card containers at the bottom of the video frame using Pillow. The hook text overlays for the first 3 seconds and the CTA overlays for the final 3 seconds.
-*   **Transitions**: Uses MoviePy `vfx.FadeIn(1.0)` and `vfx.FadeOut(1.0)` to smooth entry and exit clips.
-
-### 3. Workflow Integration
-Modified `generate_reel` node in [nodes.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/graph/nodes.py) to:
-1.  Establish `/app/outputs/reels/` as the target directory.
-2.  Trigger the `ReelGenerator` service using the active image path and generated AI reel script structure.
-3.  Save the resulting path (`/app/outputs/reels/{artwork_id}.mp4`) to the database in `artworks.reel_path` and bubble it up into the LangGraph state.
-4.  Capture exceptions to log `reel_render_failed` structured data, record exceptions in the run's history, and gracefully transition to the error handler without crashing the worker.
+These schema modifications were migrated via Alembic (`61cbc473be4c` and `a76ba7fe1bc9` respectively) and applied directly to the PostgreSQL database.
 
 ---
 
-## 🧪 E2E Verification & Test Results
+### 2. Service Integrations
 
-### 1. E2E Video Compilation Script
-We created a verification script [verify_reel_generator.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/tests/verify_reel_generator.py) and ran it inside the container:
-```bash
-docker compose exec app env PYTHONPATH=/app python tests/verify_reel_generator.py
-```
-**Output Outcome**:
-```
-Starting ReelGenerator verification...
-Creating mock source image...
-Mock image saved to: /app/outputs/temp/mock_artwork.png
-Instantiating ReelGenerator and rendering video...
-2026-06-09 05:56:38 [info     ] reel_render_started            image_path=/app/outputs/temp/mock_artwork.png module=backend.services.reel_generator output_path=/app/outputs/temp/mock_reel.mp4
-2026-06-09 05:56:57 [info     ] reel_render_completed          execution_time_ms=18724.45978399992 module=backend.services.reel_generator output_path=/app/outputs/temp/mock_reel.mp4
-Performing assertions...
-Generated video size: 95518 bytes
+#### A. Instagram Publisher Service
+Created [instagram_publisher.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/services/instagram_publisher.py):
+- Orchestrates Meta Graph API calls:
+  1. Initialize Media Container (`POST /v19.0/{account_id}/media`)
+  2. Poll Container Status (`GET /v19.0/{container_id}`) with 5-second interval retries
+  3. Publish Media Reel (`POST /v19.0/{account_id}/media_publish`)
+  4. Fetch Permalink (`GET /v19.0/{post_id}?fields=permalink`)
 
-==================================================
-SUCCESS: ReelGenerator verified successfully!
-Video file compiled at: /app/outputs/temp/mock_reel.mp4
-==================================================
-```
-This confirms that the entire video rendering pipeline performs successfully inside the Docker environment.
+#### B. YouTube Publisher Service
+Created [youtube_publisher.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/services/youtube_publisher.py):
+- Orchestrates Google OAuth & Resumable Video Upload:
+  1. Retrieve Access Token via OAuth token refresh endpoint (`https://oauth2.googleapis.com/token`)
+  2. Initiate Resumable Upload Session by posting metadata (`https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status`) and parsing the returned `Location` header
+  3. Upload raw MP4 video bytes via a `PUT` request to the returned upload session URL
+  4. Automatically appends `#shorts` to titles and restricts them to the 100-character limit
 
-### 2. Integration & Unit Test Suite
-Ran the Pytest test suite on the host machine. All **19 tests** passed successfully:
+---
+
+### 3. API Router & Schemas
+Defined request/response models in [artwork.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/schemas/artwork.py). Added the following endpoints in [artwork.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/api/v1/artwork.py) along with their corresponding dependencies in [deps.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/api/deps.py):
+- `POST /api/v1/artworks/{id}/publish/instagram` & `GET /api/v1/artworks/{id}/instagram-status`
+- `POST /api/v1/artworks/{id}/publish/youtube` & `GET /api/v1/artworks/{id}/youtube-status`
+
+---
+
+### 4. LangGraph Workflow Routing & Nodes
+- Replaced the mock publishing nodes in [nodes.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/graph/nodes.py) with the real service-calling integrations.
+- Configured structured telemetry logs: `instagram_publish_started`, `instagram_publish_completed`, `instagram_publish_failed`, `youtube_publish_started`, `youtube_publish_completed`, and `youtube_publish_failed`.
+- Redefined conditional transitions in [workflow.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/graph/workflow.py) to achieve the requested execution chain:
+  `generate_reel` -> `publish_instagram` -> `publish_youtube` -> `collect_analytics`.
+- The graph checks flag statuses in the settings:
+  - If a step is disabled, it is gracefully bypassed to the next active publishing step.
+  - If any publishing node fails, it transitions directly to the `handle_error` node.
+
+---
+
+## Verification Results
+
+### 1. Database Migrations
+Both Alembic migrations successfully completed upgrades inside PostgreSQL:
 ```
-============================= 19 passed in 2.08s ==============================
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade e04218e7bbac -> 61cbc473be4c, add_instagram_publishing_fields
+INFO  [alembic.runtime.migration] Running upgrade 61cbc473be4c -> a76ba7fe1bc9, add_youtube_publishing_fields
+```
+
+### 2. Test Execution (27/27 Passing)
+Running the entire test suite on the host confirms all unit and integration tests (including OAuth token fetches, resumable bytes upload, API endpoints, and workflow node state transitions) pass cleanly:
+```
+platform win32 -- Python 3.11.2, pytest-9.0.3, pluggy-1.6.0
+plugins: anyio-4.13.0, Faker-40.21.0, langsmith-0.8.8, asyncio-1.4.0, cov-7.1.0
+collected 27 items
+
+tests/integration/test_artwork_workflow.py::test_upload_artwork_api PASSED
+tests/integration/test_artwork_workflow.py::test_trigger_workflow_api PASSED
+tests/integration/test_artwork_workflow.py::test_get_analysis_api PASSED
+tests/integration/test_artwork_workflow.py::test_get_seo_api PASSED
+tests/integration/test_artwork_workflow.py::test_get_caption_api PASSED
+tests/integration/test_artwork_workflow.py::test_get_hashtags_api PASSED
+tests/integration/test_artwork_workflow.py::test_get_reel_api PASSED
+tests/test_instagram_publish.py::test_instagram_publisher_service_success PASSED
+tests/test_instagram_publish.py::test_publish_instagram_api_endpoints PASSED
+tests/test_instagram_publish.py::test_publish_instagram_graph_node PASSED
+tests/test_youtube_publish.py::test_youtube_publisher_service_success PASSED
+tests/test_youtube_publish.py::test_youtube_publisher_service_missing_credentials PASSED
+tests/test_youtube_publish.py::test_youtube_publisher_service_token_failure PASSED
+tests/test_youtube_publish.py::test_publish_youtube_api_endpoints PASSED
+tests/test_youtube_publish.py::test_publish_youtube_graph_node PASSED
+unit tests PASSED (12 items)
+======================== 27 passed, 1 warning in 4.35s ========================
 ```

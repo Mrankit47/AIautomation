@@ -6,6 +6,7 @@ from backend.models.artwork import Artwork, ArtworkStatus
 from backend.models.base import Base
 from backend.models.user import User
 from backend.models.workflow_run import WorkflowRun, WorkflowStatus
+from backend.models.analytics import ArtworkAnalytics
 
 __all__ = [
     "Base",
@@ -14,4 +15,5 @@ __all__ = [
     "User",
     "WorkflowRun",
     "WorkflowStatus",
+    "ArtworkAnalytics",
 ]

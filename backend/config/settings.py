@@ -10,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -102,6 +102,22 @@ class InstagramSettings(BaseModel):
     app_secret: SecretStr = SecretStr("")
     access_token: SecretStr = SecretStr("")
     business_account_id: str = ""
+    account_id: str = ""
+
+    @model_validator(mode="after")
+    def populate_account_ids(self) -> InstagramSettings:
+        import os
+        # Prioritize INSTAGRAM_ACCOUNT_ID env var, then fallback
+        env_acct = os.getenv("INSTAGRAM_ACCOUNT_ID") or os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID")
+        if env_acct:
+            self.account_id = env_acct
+        
+        if not self.account_id and self.business_account_id:
+            self.account_id = self.business_account_id
+        elif not self.business_account_id and self.account_id:
+            self.business_account_id = self.account_id
+            
+        return self
 
 
 class YouTubeSettings(BaseModel):

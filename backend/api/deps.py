@@ -40,3 +40,33 @@ def get_workflow_service(
 ) -> WorkflowService:
     """Provide a WorkflowService instance with injected dependencies."""
     return WorkflowService(session=session)
+
+
+def get_instagram_publisher() -> InstagramPublisher:
+    """Provide an InstagramPublisher service instance."""
+    from backend.services.instagram_publisher import InstagramPublisher
+    return InstagramPublisher()
+
+
+def get_youtube_publisher() -> YouTubePublisher:
+    """Provide a YouTubePublisher service instance."""
+    from backend.services.youtube_publisher import YouTubePublisher
+    return YouTubePublisher()
+
+
+def get_instagram_analytics_service() -> InstagramAnalyticsService:
+    """Provide an InstagramAnalyticsService instance."""
+    from backend.services.instagram_analytics import InstagramAnalyticsService
+    return InstagramAnalyticsService()
+
+
+def get_youtube_analytics_service() -> YouTubeAnalyticsService:
+    """Provide a YouTubeAnalyticsService instance."""
+    from backend.services.youtube_analytics import YouTubeAnalyticsService
+    return YouTubeAnalyticsService()
+
+
+def get_ai_recommendation_service() -> AIRecommendationService:
+    """Provide an AIRecommendationService instance."""
+    from backend.services.ai_recommendations import AIRecommendationService
+    return AIRecommendationService()

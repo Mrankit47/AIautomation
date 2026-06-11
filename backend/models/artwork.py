@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import enum
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Enum, Integer, String, Text
+from sqlalchemy import Enum, Integer, String, Text, DateTime
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -58,12 +59,30 @@ class Artwork(UUIDMixin, TimestampMixin, Base):
     reel_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     reel_script: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # ── Instagram Publishing ─────────────────────────────────────────────
+    instagram_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    instagram_post_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    instagram_permalink: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    instagram_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # ── YouTube Publishing ───────────────────────────────────────────────
+    youtube_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    youtube_video_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    youtube_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    youtube_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # ── Error Tracking ───────────────────────────────────────────────────
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # ── Relationships ────────────────────────────────────────────────────
     workflow_runs: Mapped[list["WorkflowRun"]] = relationship(
         "WorkflowRun",
+        back_populates="artwork",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    analytics: Mapped[list["ArtworkAnalytics"]] = relationship(
+        "ArtworkAnalytics",
         back_populates="artwork",
         cascade="all, delete-orphan",
         lazy="selectin",
@@ -75,3 +94,4 @@ class Artwork(UUIDMixin, TimestampMixin, Base):
 
 # Avoid circular import — WorkflowRun is imported for type checking only.
 from backend.models.workflow_run import WorkflowRun  # noqa: E402, F401
+from backend.models.analytics import ArtworkAnalytics  # noqa: E402, F401

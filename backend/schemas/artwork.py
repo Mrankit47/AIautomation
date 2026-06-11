@@ -38,6 +38,14 @@ class ArtworkResponse(BaseModel):
     youtube_description: str | None = None
     reel_path: str | None = None
     reel_script: dict[str, Any] | None = None
+    instagram_status: str | None = None
+    instagram_post_id: str | None = None
+    instagram_permalink: str | None = None
+    instagram_published_at: datetime | None = None
+    youtube_status: str | None = None
+    youtube_video_id: str | None = None
+    youtube_url: str | None = None
+    youtube_published_at: datetime | None = None
     error_message: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -90,3 +98,47 @@ class ArtworkReelScriptResponse(BaseModel):
 
     artwork_id: uuid.UUID
     reel_script: dict[str, Any] | None = None
+
+
+class InstagramPublishResponse(BaseModel):
+    """Response schema for initiating/finishing Instagram publishing."""
+
+    artwork_id: uuid.UUID
+    instagram_status: str | None
+    instagram_post_id: str | None = None
+    instagram_permalink: str | None = None
+    instagram_published_at: datetime | None = None
+    error_message: str | None = None
+
+
+class InstagramStatusResponse(BaseModel):
+    """Response schema for Instagram publishing status query."""
+
+    artwork_id: uuid.UUID
+    instagram_status: str | None
+    instagram_post_id: str | None = None
+    instagram_permalink: str | None = None
+    instagram_published_at: datetime | None = None
+    error_message: str | None = None
+
+
+class YouTubePublishResponse(BaseModel):
+    """Response schema for initiating/finishing YouTube publishing."""
+
+    artwork_id: uuid.UUID
+    youtube_status: str | None
+    youtube_video_id: str | None = None
+    youtube_url: str | None = None
+    youtube_published_at: datetime | None = None
+    error_message: str | None = None
+
+
+class YouTubeStatusResponse(BaseModel):
+    """Response schema for YouTube publishing status query."""
+
+    artwork_id: uuid.UUID
+    youtube_status: str | None
+    youtube_video_id: str | None = None
+    youtube_url: str | None = None
+    youtube_published_at: datetime | None = None
+    error_message: str | None = None

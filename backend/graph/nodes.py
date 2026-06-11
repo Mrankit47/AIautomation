@@ -422,18 +422,67 @@ async def publish_instagram(state: ArtworkWorkflowState) -> dict[str, Any]:
     """Node: Publish to Instagram."""
     artwork_id = state["artwork_id"]
     workflow_id = state["workflow_id"]
-    logger.info("node_execute", node="publish_instagram", artwork_id=artwork_id)
+    logger.info("instagram_publish_started", artwork_id=artwork_id, workflow_id=workflow_id)
     _update_run_node(workflow_id, "publish_instagram")
+    _update_run_publishing_status(workflow_id, "instagram", "pending")
+    _update_artwork_multiple_fields(artwork_id, {"instagram_status": "pending"})
 
     try:
-        _update_run_publishing_status(workflow_id, "instagram", "pending")
+        # Load reel_path and caption from DB
+        from backend.database.session import get_sync_session
+        from backend.models.artwork import Artwork
+        from sqlalchemy import select
+
+        session = get_sync_session()
+        reel_path = None
+        caption = None
+        try:
+            art = session.execute(
+                select(Artwork).where(Artwork.id == uuid.UUID(artwork_id))
+            ).scalar_one_or_none()
+            if art:
+                reel_path = art.reel_path
+                caption = art.caption
+        finally:
+            session.close()
+
+        if not reel_path:
+            raise ValueError("No generated reel path found to publish.")
+        if not caption:
+            raise ValueError("No caption found to publish.")
+
+        # Transition to processing status
+        _update_run_publishing_status(workflow_id, "instagram", "processing")
+        _update_artwork_multiple_fields(artwork_id, {"instagram_status": "processing"})
+
+        # Instantiate service and publish
+        from backend.services.instagram_publisher import InstagramPublisher
+        publisher = InstagramPublisher()
+        result = await publisher.publish_reel(reel_path, caption)
+
+        # Success - update fields and set status to published
+        _update_artwork_multiple_fields(
+            artwork_id,
+            {
+                "instagram_status": "published",
+                "instagram_post_id": result["instagram_post_id"],
+                "instagram_permalink": result["instagram_permalink"],
+                "instagram_published_at": result["instagram_published_at"],
+            }
+        )
+        _update_run_publishing_status(workflow_id, "instagram", "published")
+        logger.info("instagram_publish_completed", artwork_id=artwork_id, workflow_id=workflow_id, post_id=result["instagram_post_id"])
+
         return {
-            "instagram_status": "pending",
+            "instagram_status": "published",
             "current_node": "publish_instagram",
         }
     except Exception as exc:
+        logger.error("instagram_publish_failed", artwork_id=artwork_id, workflow_id=workflow_id, error=str(exc))
         err = _make_error("publish_instagram", exc)
         _update_run_node(workflow_id, "publish_instagram", status="failed", error_history=[err])
+        _update_run_publishing_status(workflow_id, "instagram", "failed")
+        _update_artwork_multiple_fields(artwork_id, {"instagram_status": "failed", "error_message": str(exc)})
         return {
             "instagram_status": "failed",
             "current_node": "publish_instagram",
@@ -446,18 +495,71 @@ async def publish_youtube(state: ArtworkWorkflowState) -> dict[str, Any]:
     """Node: Publish to YouTube Shorts."""
     artwork_id = state["artwork_id"]
     workflow_id = state["workflow_id"]
-    logger.info("node_execute", node="publish_youtube", artwork_id=artwork_id)
+    logger.info("youtube_publish_started", artwork_id=artwork_id, workflow_id=workflow_id)
     _update_run_node(workflow_id, "publish_youtube")
+    _update_run_publishing_status(workflow_id, "youtube", "pending")
+    _update_artwork_multiple_fields(artwork_id, {"youtube_status": "pending"})
 
     try:
-        _update_run_publishing_status(workflow_id, "youtube", "pending")
+        # Load reel_path, youtube_title, and youtube_description from DB
+        from backend.database.session import get_sync_session
+        from backend.models.artwork import Artwork
+        from sqlalchemy import select
+
+        session = get_sync_session()
+        reel_path = None
+        title = None
+        description = None
+        try:
+            art = session.execute(
+                select(Artwork).where(Artwork.id == uuid.UUID(artwork_id))
+            ).scalar_one_or_none()
+            if art:
+                reel_path = art.reel_path
+                title = art.youtube_title or art.title or art.original_filename.rsplit(".", 1)[0]
+                description = art.youtube_description or art.caption or ""
+        finally:
+            session.close()
+
+        if not reel_path:
+            raise ValueError("No generated reel path found to publish to YouTube.")
+
+        # Transition to processing status
+        _update_run_publishing_status(workflow_id, "youtube", "processing")
+        _update_artwork_multiple_fields(artwork_id, {"youtube_status": "processing"})
+
+        # Instantiate service and publish
+        from backend.services.youtube_publisher import YouTubePublisher
+        publisher = YouTubePublisher()
+        result = await publisher.publish_short(
+            reel_path=reel_path,
+            title=title,
+            description=description,
+        )
+
+        # Success - update fields and set status to published
+        _update_artwork_multiple_fields(
+            artwork_id,
+            {
+                "youtube_status": "published",
+                "youtube_video_id": result["youtube_video_id"],
+                "youtube_url": result["youtube_url"],
+                "youtube_published_at": result["youtube_published_at"],
+            }
+        )
+        _update_run_publishing_status(workflow_id, "youtube", "published")
+        logger.info("youtube_publish_completed", artwork_id=artwork_id, workflow_id=workflow_id, video_id=result["youtube_video_id"])
+
         return {
-            "youtube_status": "pending",
+            "youtube_status": "published",
             "current_node": "publish_youtube",
         }
     except Exception as exc:
+        logger.error("youtube_publish_failed", artwork_id=artwork_id, workflow_id=workflow_id, error=str(exc))
         err = _make_error("publish_youtube", exc)
         _update_run_node(workflow_id, "publish_youtube", status="failed", error_history=[err])
+        _update_run_publishing_status(workflow_id, "youtube", "failed")
+        _update_artwork_multiple_fields(artwork_id, {"youtube_status": "failed", "error_message": str(exc)})
         return {
             "youtube_status": "failed",
             "current_node": "publish_youtube",
@@ -518,11 +620,82 @@ async def collect_analytics(state: ArtworkWorkflowState) -> dict[str, Any]:
     """Node: Collect analytics across published platforms."""
     artwork_id = state["artwork_id"]
     workflow_id = state["workflow_id"]
-    logger.info("node_execute", node="collect_analytics", artwork_id=artwork_id)
-    _update_run_node(workflow_id, "collect_analytics", status="completed")
+    logger.info("analytics_collection_started", artwork_id=artwork_id, workflow_id=workflow_id)
+    _update_run_node(workflow_id, "collect_analytics")
 
-    # Update artwork status to completed since workflow completed
+    # Load artwork details and invoke publisher analytics
+    from backend.database.session import get_sync_session
+    from backend.models.artwork import Artwork
+    from backend.models.analytics import ArtworkAnalytics
+    from sqlalchemy import select
+
+    session = get_sync_session()
+    try:
+        art = session.execute(
+            select(Artwork).where(Artwork.id == uuid.UUID(artwork_id))
+        ).scalar_one_or_none()
+        if art:
+            # ── Instagram Analytics Collection ──
+            if art.instagram_status == "published" and art.instagram_post_id:
+                try:
+                    from backend.services.instagram_analytics import InstagramAnalyticsService
+                    ig_service = InstagramAnalyticsService()
+                    ig_metrics = await ig_service.collect_metrics(art.instagram_post_id)
+                    
+                    ig_analytics = ArtworkAnalytics(
+                        artwork_id=art.id,
+                        platform="instagram",
+                        views=ig_metrics["views"],
+                        reach=ig_metrics["reach"],
+                        impressions=ig_metrics["impressions"],
+                        likes=ig_metrics["likes"],
+                        comments=ig_metrics["comments"],
+                        shares=ig_metrics["shares"],
+                        saves=ig_metrics["saves"],
+                        watch_time=ig_metrics["watch_time"],
+                        engagement_rate=ig_metrics["engagement_rate"],
+                        collected_at=ig_metrics["collected_at"],
+                    )
+                    session.add(ig_analytics)
+                except Exception as e:
+                    logger.warning("instagram_analytics_collection_failed_in_node", artwork_id=artwork_id, error=str(e))
+
+            # ── YouTube Analytics Collection ──
+            if art.youtube_status == "published" and art.youtube_video_id:
+                try:
+                    from backend.services.youtube_analytics import YouTubeAnalyticsService
+                    yt_service = YouTubeAnalyticsService()
+                    yt_metrics = await yt_service.collect_metrics(art.youtube_video_id, art.youtube_published_at)
+                    
+                    yt_analytics = ArtworkAnalytics(
+                        artwork_id=art.id,
+                        platform="youtube",
+                        views=yt_metrics["views"],
+                        reach=yt_metrics["reach"],
+                        impressions=yt_metrics["impressions"],
+                        likes=yt_metrics["likes"],
+                        comments=yt_metrics["comments"],
+                        shares=yt_metrics["shares"],
+                        saves=yt_metrics["saves"],
+                        watch_time=yt_metrics["watch_time"],
+                        engagement_rate=yt_metrics["engagement_rate"],
+                        collected_at=yt_metrics["collected_at"],
+                    )
+                    session.add(yt_analytics)
+                except Exception as e:
+                    logger.warning("youtube_analytics_collection_failed_in_node", artwork_id=artwork_id, error=str(e))
+
+        session.commit()
+    except Exception as exc:
+        logger.error("analytics_persistence_failed_in_node", artwork_id=artwork_id, error=str(exc))
+        session.rollback()
+    finally:
+        session.close()
+
+    # Mark node and artwork as completed
+    _update_run_node(workflow_id, "collect_analytics", status="completed")
     _update_artwork_multiple_fields(artwork_id, {}, status="completed")
+    logger.info("analytics_collection_completed", artwork_id=artwork_id, workflow_id=workflow_id)
 
     return {
         "current_node": "collect_analytics",
