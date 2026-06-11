@@ -12,16 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.logging import get_logger
 from backend.models.analytics import ArtworkAnalytics
 from backend.models.artwork import Artwork
-from backend.providers.gemini import GeminiProvider
+from backend.providers.factory import get_provider
 
 logger = get_logger(__name__)
 
 
 class AIRecommendationService:
-    """Analyzes historic artwork performance and provides AI recommendations via Gemini."""
+    """Analyzes historic artwork performance and provides AI recommendations via the default provider."""
 
     def __init__(self) -> None:
-        self._provider = GeminiProvider()
+        self._provider = get_provider()
 
     async def generate_recommendations(self, session: AsyncSession) -> dict[str, Any]:
         """Fetch past performance metrics and generate structured post recommendations.

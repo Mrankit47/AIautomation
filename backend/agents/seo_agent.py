@@ -9,7 +9,7 @@ from typing import Any
 from backend.agents.base import AgentResult, BaseAgent
 from backend.core.logging import get_logger
 from backend.prompts.registry import PromptRegistry
-from backend.providers.gemini import GeminiProvider
+from backend.providers.factory import get_provider
 
 logger = get_logger(__name__)
 
@@ -63,7 +63,7 @@ class SEOAgent(BaseAgent):
                 analysis=json.dumps(analysis) if analysis else "",
             )
 
-            provider = GeminiProvider()
+            provider = get_provider()
             result = await provider.generate_structured(
                 prompt=rendered_prompt,
                 output_schema=prompt_template.output_schema or {},

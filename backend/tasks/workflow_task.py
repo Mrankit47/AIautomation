@@ -71,8 +71,9 @@ def _mark_running(workflow_run_id: uuid.UUID) -> None:
 def _mark_completed(
     workflow_run_id: uuid.UUID,
     result_data: dict,
+    status: str = "completed",
 ) -> None:
-    """Set WorkflowRun status to COMPLETED with result payload."""
+    """Set WorkflowRun status with result payload."""
     session = _get_sync_session()
     try:
         run = session.execute(
@@ -86,7 +87,11 @@ def _mark_completed(
             )
             return
 
-        run.status = WorkflowStatus.COMPLETED
+        from backend.models.workflow_run import WorkflowStatus
+        if status == "completed_with_warnings":
+            run.status = WorkflowStatus.COMPLETED_WITH_WARNINGS
+        else:
+            run.status = WorkflowStatus.COMPLETED
         run.completed_at = datetime.now(timezone.utc)
         run.result = result_data
         session.commit()
@@ -238,8 +243,9 @@ def execute_workflow(
             raise RuntimeError(error_msg)
 
         # ── 4. Mark COMPLETED ────────────────────────────────────────────
+        workflow_status = final_state.get("workflow_status", "completed")
         result_data = {
-            "status": "completed",
+            "status": workflow_status,
             "artwork_id": artwork_id,
             "workflow_version": workflow_version,
             "analysis": final_state.get("analysis"),
@@ -251,7 +257,7 @@ def execute_workflow(
             "reel_path": final_state.get("reel_path"),
         }
 
-        _mark_completed(run_uuid, result_data)
+        _mark_completed(run_uuid, result_data, status=workflow_status)
 
         logger.info(
             "execute_workflow_completed",

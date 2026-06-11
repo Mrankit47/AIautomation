@@ -44,6 +44,38 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.redis = aioredis.Redis(connection_pool=redis_pool)
     logger.info("redis_pool_initialized")
 
+    # ── Startup AI Providers Validation ─────────────────────────────────
+    gemini_key = settings.gemini.api_key.get_secret_value() if settings.gemini.api_key else ""
+    if not gemini_key or gemini_key == "mock-api-key":
+        logger.warning("gemini_api_key_invalid_or_mock", api_key_length=len(gemini_key) if gemini_key else 0)
+    else:
+        logger.info("gemini_api_key_present")
+
+    groq_key = settings.groq_api_key.get_secret_value() if settings.groq_api_key else ""
+    if not groq_key or groq_key == "mock-api-key":
+        logger.warning("groq_api_key_invalid_or_mock", api_key_length=len(groq_key) if groq_key else 0)
+    else:
+        logger.info("groq_api_key_present")
+
+    try:
+        from backend.providers.gemini import GeminiProvider
+        from backend.providers.groq import GroqProvider
+
+        gemini_prov = GeminiProvider()
+        groq_prov = GroqProvider()
+
+        gemini_healthy = await gemini_prov.health_check()
+        groq_healthy = await groq_prov.health_check()
+
+        logger.info(
+            "ai_providers_status",
+            gemini_status="healthy" if gemini_healthy else "unhealthy",
+            groq_status="healthy" if groq_healthy else "unhealthy",
+            default_provider=settings.ai_provider,
+        )
+    except Exception as exc:
+        logger.error("ai_providers_validation_failed", error=str(exc))
+
     logger.info("application_started")
 
     yield

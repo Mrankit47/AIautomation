@@ -12,6 +12,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.models.base import Base, TimestampMixin, UUIDMixin
 
 
+from sqlalchemy.ext.hybrid import hybrid_property
+
 class WorkflowStatus(str, enum.Enum):
     """Status of a workflow execution."""
 
@@ -20,6 +22,7 @@ class WorkflowStatus(str, enum.Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    COMPLETED_WITH_WARNINGS = "completed_with_warnings"
 
 
 class WorkflowRun(UUIDMixin, TimestampMixin, Base):
@@ -39,11 +42,35 @@ class WorkflowRun(UUIDMixin, TimestampMixin, Base):
     workflow_version: Mapped[str] = mapped_column(
         String(20), default="v1", nullable=False
     )
-    status: Mapped[WorkflowStatus] = mapped_column(
-        Enum(WorkflowStatus, name="workflow_status", create_constraint=True),
+    _db_status: Mapped[WorkflowStatus] = mapped_column(
+        "status",
+        Enum(
+            "pending",
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+            name="workflow_status",
+            native_enum=True,
+            values_callable=lambda x: ["pending", "running", "completed", "failed", "cancelled"]
+        ),
         default=WorkflowStatus.PENDING,
         nullable=False,
     )
+
+    @hybrid_property
+    def status(self) -> WorkflowStatus:
+        if self._db_status == WorkflowStatus.COMPLETED and self.error_history:
+            return WorkflowStatus.COMPLETED_WITH_WARNINGS
+        return self._db_status
+
+    @status.setter
+    def status(self, value: WorkflowStatus) -> None:
+        if value == WorkflowStatus.COMPLETED_WITH_WARNINGS:
+            self._db_status = WorkflowStatus.COMPLETED
+        else:
+            self._db_status = value
+
     current_node: Mapped[str | None] = mapped_column(String(100), nullable=True)
     celery_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 

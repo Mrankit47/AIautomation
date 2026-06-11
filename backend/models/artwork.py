@@ -13,6 +13,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.models.base import Base, TimestampMixin, UUIDMixin
 
 
+from sqlalchemy.ext.hybrid import hybrid_property
+
 class ArtworkStatus(str, enum.Enum):
     """Lifecycle status of an artwork through the processing pipeline."""
 
@@ -22,6 +24,7 @@ class ArtworkStatus(str, enum.Enum):
     PUBLISHING = "publishing"
     COMPLETED = "completed"
     FAILED = "failed"
+    COMPLETED_WITH_WARNINGS = "completed_with_warnings"
 
 
 class Artwork(UUIDMixin, TimestampMixin, Base):
@@ -40,11 +43,37 @@ class Artwork(UUIDMixin, TimestampMixin, Base):
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # ── Processing Status ────────────────────────────────────────────────
-    status: Mapped[ArtworkStatus] = mapped_column(
-        Enum(ArtworkStatus, name="artwork_status", create_constraint=True),
+    _db_status: Mapped[ArtworkStatus] = mapped_column(
+        "status",
+        Enum(
+            "uploaded",
+            "analyzing",
+            "processing",
+            "publishing",
+            "completed",
+            "failed",
+            name="artwork_status",
+            native_enum=True,
+            values_callable=lambda x: ["uploaded", "analyzing", "processing", "publishing", "completed", "failed"]
+        ),
         default=ArtworkStatus.UPLOADED,
         nullable=False,
     )
+
+    @hybrid_property
+    def status(self) -> ArtworkStatus:
+        if self._db_status == ArtworkStatus.COMPLETED:
+            for run in self.workflow_runs:
+                if getattr(run, "status", None) == "completed_with_warnings":
+                    return ArtworkStatus.COMPLETED_WITH_WARNINGS
+        return self._db_status
+
+    @status.setter
+    def status(self, value: ArtworkStatus) -> None:
+        if value == ArtworkStatus.COMPLETED_WITH_WARNINGS:
+            self._db_status = ArtworkStatus.COMPLETED
+        else:
+            self._db_status = value
 
     # ── AI-Generated Content ─────────────────────────────────────────────
     analysis_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)

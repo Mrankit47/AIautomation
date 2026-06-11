@@ -66,9 +66,15 @@ def _update_run_node(
                 run.status = WorkflowStatus.COMPLETED
             elif status == "failed":
                 run.status = WorkflowStatus.FAILED
+            elif status == "completed_with_warnings":
+                run.status = WorkflowStatus.COMPLETED_WITH_WARNINGS
 
             if error_history is not None:
-                run.error_history = error_history
+                current_errs = list(run.error_history or [])
+                for eh in error_history:
+                    if eh not in current_errs:
+                        current_errs.append(eh)
+                run.error_history = current_errs
 
             session.commit()
     except Exception as exc:
@@ -294,10 +300,13 @@ async def generate_caption(state: ArtworkWorkflowState) -> dict[str, Any]:
         }
     except Exception as exc:
         err = _make_error("generate_caption", exc)
-        _update_run_node(workflow_id, "generate_caption", status="failed", error_history=[err])
+        _update_run_node(workflow_id, "generate_caption", status="running", error_history=[err])
         return {
+            "caption": None,
+            "youtube_title": None,
+            "youtube_description": None,
             "current_node": "generate_caption",
-            "workflow_status": "failed",
+            "workflow_status": "completed_with_warnings",
             "error_history": [err],
         }
 
@@ -329,10 +338,11 @@ async def generate_hashtags(state: ArtworkWorkflowState) -> dict[str, Any]:
         }
     except Exception as exc:
         err = _make_error("generate_hashtags", exc)
-        _update_run_node(workflow_id, "generate_hashtags", status="failed", error_history=[err])
+        _update_run_node(workflow_id, "generate_hashtags", status="running", error_history=[err])
         return {
+            "hashtags": None,
             "current_node": "generate_hashtags",
-            "workflow_status": "failed",
+            "workflow_status": "completed_with_warnings",
             "error_history": [err],
         }
 
@@ -410,10 +420,12 @@ async def generate_reel(state: ArtworkWorkflowState) -> dict[str, Any]:
         )
 
         err = _make_error("generate_reel", exc)
-        _update_run_node(workflow_id, "generate_reel", status="failed", error_history=[err])
+        _update_run_node(workflow_id, "generate_reel", status="running", error_history=[err])
         return {
+            "reel_script": None,
+            "reel_path": None,
             "current_node": "generate_reel",
-            "workflow_status": "failed",
+            "workflow_status": "completed_with_warnings",
             "error_history": [err],
         }
 
@@ -693,13 +705,17 @@ async def collect_analytics(state: ArtworkWorkflowState) -> dict[str, Any]:
         session.close()
 
     # Mark node and artwork as completed
-    _update_run_node(workflow_id, "collect_analytics", status="completed")
-    _update_artwork_multiple_fields(artwork_id, {}, status="completed")
-    logger.info("analytics_collection_completed", artwork_id=artwork_id, workflow_id=workflow_id)
+    final_status = "completed"
+    if state.get("workflow_status") == "completed_with_warnings":
+        final_status = "completed_with_warnings"
+
+    _update_run_node(workflow_id, "collect_analytics", status=final_status)
+    _update_artwork_multiple_fields(artwork_id, {}, status=final_status)
+    logger.info("analytics_collection_completed", artwork_id=artwork_id, workflow_id=workflow_id, status=final_status)
 
     return {
         "current_node": "collect_analytics",
-        "workflow_status": "completed",
+        "workflow_status": final_status,
     }
 
 

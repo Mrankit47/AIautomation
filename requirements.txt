@@ -22,6 +22,7 @@ crewai>=0.86.0
 
 # ── AI Provider ──────────────────────────────────────────
 google-generativeai>=0.8.0
+groq>=0.9.0
 
 # ── Authentication ───────────────────────────────────────
 python-jose[cryptography]>=3.3.0

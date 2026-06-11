@@ -7,6 +7,8 @@ from typing import Any
 from backend.agents.base import AgentResult, BaseAgent
 from backend.core.logging import get_logger
 
+from backend.providers.factory import get_provider
+
 logger = get_logger(__name__)
 
 
