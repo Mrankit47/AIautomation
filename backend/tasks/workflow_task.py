@@ -71,7 +71,7 @@ def _mark_running(workflow_run_id: uuid.UUID) -> None:
 def _mark_completed(
     workflow_run_id: uuid.UUID,
     result_data: dict,
-    status: str = "completed",
+    status: str = "COMPLETED",
 ) -> None:
     """Set WorkflowRun status with result payload."""
     session = _get_sync_session()
@@ -88,7 +88,7 @@ def _mark_completed(
             return
 
         from backend.models.workflow_run import WorkflowStatus
-        if status == "completed_with_warnings":
+        if status.upper() == "COMPLETED_WITH_WARNINGS":
             run.status = WorkflowStatus.COMPLETED_WITH_WARNINGS
         else:
             run.status = WorkflowStatus.COMPLETED
@@ -213,7 +213,7 @@ def execute_workflow(
                 "youtube_status": None,
                 "pinterest_status": None,
                 "tiktok_status": None,
-                "workflow_status": "running",
+                "workflow_status": "RUNNING",
                 "current_node": "start",
                 "error_history": [],
                 "messages": [],
@@ -236,14 +236,15 @@ def execute_workflow(
         final_state = asyncio.run(compiled_graph.ainvoke(initial_state))
 
         # Check if the workflow ended in a failed state
-        if final_state.get("workflow_status") == "failed":
+        state_status = final_state.get("workflow_status")
+        if state_status and state_status.upper() == "FAILED":
             error_msg = f"Workflow failed in node: {final_state.get('current_node', 'unknown')}"
             if final_state.get("error_history"):
                 error_msg = final_state["error_history"][-1].get("message", error_msg)
             raise RuntimeError(error_msg)
 
         # ── 4. Mark COMPLETED ────────────────────────────────────────────
-        workflow_status = final_state.get("workflow_status", "completed")
+        workflow_status = final_state.get("workflow_status", "COMPLETED")
         result_data = {
             "status": workflow_status,
             "artwork_id": artwork_id,

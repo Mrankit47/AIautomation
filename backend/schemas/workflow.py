@@ -24,7 +24,7 @@ class WorkflowTriggerResponse(BaseModel):
     artwork_id: uuid.UUID
     celery_task_id: str
     workflow_version: str
-    status: str = "pending"
+    status: str = "PENDING"
 
 
 class WorkflowStatusResponse(BaseModel):

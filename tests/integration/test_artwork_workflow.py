@@ -140,7 +140,7 @@ async def test_trigger_workflow_api(
     )
 
     assert response.status_code == 202
-    assert response.json()["status"] == "pending"
+    assert response.json()["status"] == "PENDING"
     assert "celery_task_id" in response.json()
 
 

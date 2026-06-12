@@ -18,13 +18,23 @@ from sqlalchemy.ext.hybrid import hybrid_property
 class ArtworkStatus(str, enum.Enum):
     """Lifecycle status of an artwork through the processing pipeline."""
 
-    UPLOADED = "uploaded"
-    ANALYZING = "analyzing"
-    PROCESSING = "processing"
-    PUBLISHING = "publishing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    COMPLETED_WITH_WARNINGS = "completed_with_warnings"
+    UPLOADED = "UPLOADED"
+    ANALYZING = "ANALYZING"
+    PROCESSING = "PROCESSING"
+    PUBLISHING = "PUBLISHING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    COMPLETED_WITH_WARNINGS = "COMPLETED_WITH_WARNINGS"
+
+# Validate that all enum values match PostgreSQL native uppercase constraints
+for _member in ArtworkStatus:
+    if _member.value != _member.value.upper():
+        raise ValueError(
+            f"ArtworkStatus member '{_member.name}' has non-uppercase value '{_member.value}'. "
+            "Values must be uppercase to match PostgreSQL native enum constraints."
+        )
+
+
 
 
 class Artwork(UUIDMixin, TimestampMixin, Base):
@@ -46,15 +56,15 @@ class Artwork(UUIDMixin, TimestampMixin, Base):
     _db_status: Mapped[ArtworkStatus] = mapped_column(
         "status",
         Enum(
-            "uploaded",
-            "analyzing",
-            "processing",
-            "publishing",
-            "completed",
-            "failed",
+            "UPLOADED",
+            "ANALYZING",
+            "PROCESSING",
+            "PUBLISHING",
+            "COMPLETED",
+            "FAILED",
             name="artwork_status",
             native_enum=True,
-            values_callable=lambda x: ["uploaded", "analyzing", "processing", "publishing", "completed", "failed"]
+            values_callable=lambda x: ["UPLOADED", "ANALYZING", "PROCESSING", "PUBLISHING", "COMPLETED", "FAILED"]
         ),
         default=ArtworkStatus.UPLOADED,
         nullable=False,

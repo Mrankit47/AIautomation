@@ -98,7 +98,7 @@ class WorkflowService:
             artwork_id=artwork_id,
             celery_task_id=task.id,
             workflow_version=version,
-            status="pending",
+            status=WorkflowStatus.PENDING.value,
         )
 
     async def get_workflow_status(

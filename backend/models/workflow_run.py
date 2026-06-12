@@ -17,12 +17,22 @@ from sqlalchemy.ext.hybrid import hybrid_property
 class WorkflowStatus(str, enum.Enum):
     """Status of a workflow execution."""
 
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    COMPLETED_WITH_WARNINGS = "completed_with_warnings"
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    COMPLETED_WITH_WARNINGS = "COMPLETED_WITH_WARNINGS"
+
+# Validate that all enum values match PostgreSQL native uppercase constraints
+for _member in WorkflowStatus:
+    if _member.value != _member.value.upper():
+        raise ValueError(
+            f"WorkflowStatus member '{_member.name}' has non-uppercase value '{_member.value}'. "
+            "Values must be uppercase to match PostgreSQL native enum constraints."
+        )
+
+
 
 
 class WorkflowRun(UUIDMixin, TimestampMixin, Base):
@@ -45,14 +55,14 @@ class WorkflowRun(UUIDMixin, TimestampMixin, Base):
     _db_status: Mapped[WorkflowStatus] = mapped_column(
         "status",
         Enum(
-            "pending",
-            "running",
-            "completed",
-            "failed",
-            "cancelled",
+            "PENDING",
+            "RUNNING",
+            "COMPLETED",
+            "FAILED",
+            "CANCELLED",
             name="workflow_status",
             native_enum=True,
-            values_callable=lambda x: ["pending", "running", "completed", "failed", "cancelled"]
+            values_callable=lambda x: ["PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]
         ),
         default=WorkflowStatus.PENDING,
         nullable=False,

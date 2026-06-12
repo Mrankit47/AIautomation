@@ -157,7 +157,7 @@ async def test_collect_analytics_graph_node_instagram(
             res = await collect_analytics(state)
 
             assert res["current_node"] == "collect_analytics"
-            assert res["workflow_status"] == "completed"
+            assert res["workflow_status"] == "COMPLETED"
 
             # Check database commit was called and session added analytics row
             assert mock_session_inst.add.called

@@ -1,67 +1,67 @@
-# Walkthrough: Hybrid AI Provider Architecture & Resiliency Suite
+# Walkthrough: Hybrid AI Provider Architecture & PostgreSQL Enum Case Alignment
 
-This document walks through the integration of the Hybrid AI Provider Architecture and workflow resiliency features designed to eliminate Gemini rate limit failures by routing text generation tasks to Groq while keeping Gemini for image understanding.
+This document walks through the integration of the Hybrid AI Provider Architecture, workflow resiliency features, and the case-sensitive PostgreSQL enum case-alignment suite.
 
 ---
 
-## Changes Completed
+## 1. Hybrid AI Provider Architecture (Completed)
 
-### 1. Configuration & Settings
-* Updated [settings.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/config/settings.py) to support:
-  * `ai_provider`: Runtime selector (`"gemini"` or `"groq"`).
-  * `groq_api_key`: Secret API key for Groq Cloud.
-  * `groq_model`: Model name defaulting to `llama-3.3-70b-versatile`.
+* **Configuration & Settings**: Added `ai_provider`, `groq_api_key`, and `groq_model` configurations in `backend/config/settings.py`.
+* **Groq Provider**: Implemented `GroqProvider` utilizing the official `AsyncGroq` client, JSON mode, and backoff retries.
+* **Service Migrations**: Migrated text-based agents and recommendations service to resolve dependencies dynamically via the factory (`get_provider()`).
+* **Resiliency Nodes**: Modified graph nodes (`generate_caption`, `generate_hashtags`, `generate_reel`) to convert exceptions to warnings, persisting them in `error_history` and using custom `completed_with_warnings` status properties.
 
-### 2. Provider Abstraction & Factory
-* **Groq Provider** ([groq.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/providers/groq.py)):
-  * Implements `AIProvider` using the official `AsyncGroq` client.
-  * Employs exponential backoff retry logic (up to 3 retries) on transient API exceptions.
-  * Implements structured JSON mode for schema enforcement.
-* **Provider Factory** ([factory.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/providers/factory.py)):
-  * Provides `get_provider(provider_name)` to dynamically resolve the required provider instance.
+---
 
-### 3. Database Status Mappings (No-Schema Hack)
-* To support the new `completed_with_warnings` status without altering PostgreSQL native enums, we implemented SQLAlchemy `hybrid_property` mappings:
-  * **Workflow Run** ([workflow_run.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/models/workflow_run.py)) and **Artwork** ([artwork.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/models/artwork.py)) store status in `_db_status` column.
-  * Getter returns `completed_with_warnings` if there are elements in `error_history` and `_db_status == completed`.
-  * Setter transparently maps `completed_with_warnings` back to `completed` for database persistence.
+## 2. PostgreSQL Case-Sensitive Enum Alignment (Completed)
 
-### 4. Agent & Service Migrations
-* Migrated [MetadataGeneratorAgent](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/agents/metadata_generator.py), [SEOAgent](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/agents/seo_agent.py), [CaptionAgent](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/agents/caption_agent.py), [HashtagAgent](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/agents/hashtag_agent.py), and [ReelScriptAgent](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/agents/reel_script_agent.py) to resolve dependencies using `get_provider()`.
-* Migrated [AIRecommendationService](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/services/ai_recommendations.py) to use `get_provider()`.
+### The Problem
+* Native PostgreSQL enums (`artwork_status`, `workflow_status`) are case-sensitive and store uppercase values (e.g., `UPLOADED`, `ANALYZING`, `COMPLETED`, `PENDING`).
+* The Python codebase was attempting to insert lowercase values (e.g., `"uploaded"`, `"pending"`), resulting in `500 Internal Server Error` database constraint errors during artwork uploads.
 
-### 5. API Endpoints & Events
-* Created system router endpoint `GET /api/v1/system/providers` in [system.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/api/v1/system.py) to return provider health diagnostics.
-* Mounted router in [router.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/api/router.py).
-* Integrated startup checks in [events.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/core/events.py) to validate keys and log default provider details on startup.
-
-### 6. Workflow Resiliency Nodes
-* Modified `generate_caption`, `generate_hashtags`, and `generate_reel` nodes in [nodes.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/graph/nodes.py):
-  * Exceptions are caught as warnings, logged to `error_history`, and the workflow runs continue.
-  * Transitions update the workflow status to `completed_with_warnings` at the end of execution.
-* Modified [workflow_task.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/tasks/workflow_task.py) to complete celery tasks with warnings without crashing.
+### Changes Implemented
+1. **SQLAlchemy Models & Enums Alignment**:
+   * Updated `ArtworkStatus` in [artwork.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/models/artwork.py) to declare uppercase strings:
+     `UPLOADED = "UPLOADED"`, `ANALYZING = "ANALYZING"`, etc.
+   * Updated `WorkflowStatus` in [workflow_run.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/models/workflow_run.py) to declare uppercase strings:
+     `PENDING = "PENDING"`, `RUNNING = "RUNNING"`, etc.
+   * Updated columns definitions (`_db_status` Enum argument and `values_callable`) to utilize uppercase strings.
+2. **Robust Case-Insensitive Model Validation**:
+   * Added import-time validation loops inside both models to dynamically raise `ValueError` if future developers attempt to add non-uppercase values, preventing future mismatches.
+3. **Workflow Graph & Node Updates**:
+   * Updated `_update_run_node` and `_update_artwork_multiple_fields` in [nodes.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/graph/nodes.py) to resolve the status casing dynamically (using `.upper()`).
+   * Aligned all state status payloads (e.g., return dictionaries and error handlers) to emit uppercase values.
+4. **Celery Tasks & API Schemas**:
+   * Updated [workflow_task.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/tasks/workflow_task.py) to execute and handle completion with uppercase statuses.
+   * Updated [workflow.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/schemas/workflow.py) schema model defaults to `"PENDING"`.
 
 ---
 
 ## Verification Results
 
 ### 1. Pytest Suite (54/54 Passing)
-All tests pass successfully on the host:
+All tests run and pass cleanly:
 ```bash
-tests/test_groq_provider.py PASSED
-tests/test_provider_factory.py PASSED
-tests/test_caption_agent_groq.py PASSED
-tests/test_hashtag_agent_groq.py PASSED
-tests/test_reel_script_agent_groq.py PASSED
-tests/test_system_providers_api.py PASSED
+tests/integration/test_artwork_workflow.py PASSED
 tests/test_workflow_warnings.py PASSED
 ...
-======================= 54 passed, 2 warnings in 4.17s ========================
+======================= 54 passed, 2 warnings in 6.21s ========================
 ```
 
-### 2. Manual System Health Check
-Running inside Docker container returns valid HTTP 200:
-```json
-{"gemini":"healthy","groq":"unhealthy","default_provider":"gemini"}
+### 2. Manual DB Enum Verification
+Running database query inside Postgres container:
+```bash
+docker compose exec postgres psql -U artwork_user -d artwork_automation -c "SELECT unnest(enum_range(NULL::artwork_status));"
 ```
-*(Groq is marked `unhealthy` if no `GROQ_API_KEY` is present in the `.env` file).*
+Returns:
+```
+   unnest   
+------------
+ UPLOADED
+ ANALYZING
+ PROCESSING
+ PUBLISHING
+ COMPLETED
+ FAILED
+```
+This matches the Python application code's enum mappings.

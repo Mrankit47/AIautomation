@@ -60,13 +60,14 @@ def _update_run_node(
         ).scalar_one_or_none()
         if run:
             run.current_node = node_name
-            if status == "running":
+            val = getattr(status, "value", status).upper()
+            if val == "RUNNING":
                 run.status = WorkflowStatus.RUNNING
-            elif status == "completed":
+            elif val == "COMPLETED":
                 run.status = WorkflowStatus.COMPLETED
-            elif status == "failed":
+            elif val == "FAILED":
                 run.status = WorkflowStatus.FAILED
-            elif status == "completed_with_warnings":
+            elif val == "COMPLETED_WITH_WARNINGS":
                 run.status = WorkflowStatus.COMPLETED_WITH_WARNINGS
 
             if error_history is not None:
@@ -130,7 +131,8 @@ def _update_artwork_multiple_fields(
             for k, v in fields.items():
                 setattr(art, k, v)
             if status:
-                art.status = ArtworkStatus(status)
+                val = getattr(status, "value", status).upper()
+                art.status = ArtworkStatus(val)
             session.commit()
     except Exception as exc:
         logger.error("db_update_artwork_multiple_fields_failed", artwork_id=artwork_id, error=str(exc))
@@ -300,13 +302,13 @@ async def generate_caption(state: ArtworkWorkflowState) -> dict[str, Any]:
         }
     except Exception as exc:
         err = _make_error("generate_caption", exc)
-        _update_run_node(workflow_id, "generate_caption", status="running", error_history=[err])
+        _update_run_node(workflow_id, "generate_caption", status="RUNNING", error_history=[err])
         return {
             "caption": None,
             "youtube_title": None,
             "youtube_description": None,
             "current_node": "generate_caption",
-            "workflow_status": "completed_with_warnings",
+            "workflow_status": "COMPLETED_WITH_WARNINGS",
             "error_history": [err],
         }
 
@@ -338,11 +340,11 @@ async def generate_hashtags(state: ArtworkWorkflowState) -> dict[str, Any]:
         }
     except Exception as exc:
         err = _make_error("generate_hashtags", exc)
-        _update_run_node(workflow_id, "generate_hashtags", status="running", error_history=[err])
+        _update_run_node(workflow_id, "generate_hashtags", status="RUNNING", error_history=[err])
         return {
             "hashtags": None,
             "current_node": "generate_hashtags",
-            "workflow_status": "completed_with_warnings",
+            "workflow_status": "COMPLETED_WITH_WARNINGS",
             "error_history": [err],
         }
 
@@ -420,12 +422,12 @@ async def generate_reel(state: ArtworkWorkflowState) -> dict[str, Any]:
         )
 
         err = _make_error("generate_reel", exc)
-        _update_run_node(workflow_id, "generate_reel", status="running", error_history=[err])
+        _update_run_node(workflow_id, "generate_reel", status="RUNNING", error_history=[err])
         return {
             "reel_script": None,
             "reel_path": None,
             "current_node": "generate_reel",
-            "workflow_status": "completed_with_warnings",
+            "workflow_status": "COMPLETED_WITH_WARNINGS",
             "error_history": [err],
         }
 
@@ -705,9 +707,10 @@ async def collect_analytics(state: ArtworkWorkflowState) -> dict[str, Any]:
         session.close()
 
     # Mark node and artwork as completed
-    final_status = "completed"
-    if state.get("workflow_status") == "completed_with_warnings":
-        final_status = "completed_with_warnings"
+    final_status = "COMPLETED"
+    state_status = state.get("workflow_status")
+    if state_status and state_status.upper() == "COMPLETED_WITH_WARNINGS":
+        final_status = "COMPLETED_WITH_WARNINGS"
 
     _update_run_node(workflow_id, "collect_analytics", status=final_status)
     _update_artwork_multiple_fields(artwork_id, {}, status=final_status)
@@ -733,10 +736,10 @@ async def handle_error(state: ArtworkWorkflowState) -> dict[str, Any]:
     if state.get("error_history"):
         error_msg = state["error_history"][-1].get("message", error_msg)
 
-    _update_run_node(workflow_id, "error_handler", status="failed", error_history=state.get("error_history"))
-    _update_artwork_multiple_fields(artwork_id, {"error_message": error_msg}, status="failed")
+    _update_run_node(workflow_id, "error_handler", status="FAILED", error_history=state.get("error_history"))
+    _update_artwork_multiple_fields(artwork_id, {"error_message": error_msg}, status="FAILED")
 
     return {
-        "workflow_status": "failed",
+        "workflow_status": "FAILED",
         "current_node": "error_handler",
     }

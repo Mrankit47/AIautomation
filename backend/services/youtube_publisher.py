@@ -126,6 +126,10 @@ class YouTubePublisher:
                     json=init_body,
                 )
                 init_resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                err_detail = e.response.text
+                logger.error("youtube_publish_initiation_failed", error=err_detail)
+                raise RuntimeError(f"YouTube upload initiation failed: {err_detail}") from e
             except Exception as e:
                 logger.error("youtube_publish_initiation_failed", error=str(e))
                 raise RuntimeError(f"YouTube upload initiation failed: {str(e)}") from e

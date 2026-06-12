@@ -36,7 +36,7 @@ async def test_workflow_warning_propagation() -> None:
         "reel_path": None,
         "instagram_status": None,
         "youtube_status": None,
-        "workflow_status": "running",
+        "workflow_status": "RUNNING",
         "current_node": "start",
         "error_history": [],
         "messages": [],
@@ -72,7 +72,7 @@ async def test_workflow_warning_propagation() -> None:
                  final_state = await graph.ainvoke(initial_state)
 
                  # State checks
-                 assert final_state["workflow_status"] == "completed_with_warnings"
+                 assert final_state["workflow_status"] == "COMPLETED_WITH_WARNINGS"
                  assert len(final_state["error_history"]) == 1
                  assert final_state["error_history"][0]["node"] == "generate_caption"
                  assert final_state["error_history"][0]["message"] == "Caption API timeout"
@@ -81,5 +81,5 @@ async def test_workflow_warning_propagation() -> None:
                  mock_update_run.assert_any_call(
                      workflow_id,
                      "collect_analytics",
-                     status="completed_with_warnings"
+                     status="COMPLETED_WITH_WARNINGS"
                  )
