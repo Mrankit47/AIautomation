@@ -37,8 +37,8 @@ def create_celery_app() -> Celery:
         task_acks_late=settings.celery.task_acks_late,
         worker_prefetch_multiplier=settings.celery.worker_prefetch_multiplier,
         # Timeouts
-        task_soft_time_limit=300,   # 5 minutes soft limit
-        task_time_limit=600,        # 10 minutes hard limit
+        task_soft_time_limit=600,   # 10 minutes soft limit
+        task_time_limit=900,        # 15 minutes hard limit
         result_expires=86400,       # Results expire after 24 hours
         # Queue Routing
         task_routes={

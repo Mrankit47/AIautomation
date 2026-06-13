@@ -57,14 +57,11 @@ class InstagramPublisher:
             raise InstagramAuthError("Instagram business account ID is not configured.")
 
         # Resolve reel_path to a public URL. Meta API requires a public HTTP(S) URL.
-        # If it's a local file path, check that the file exists and resolve to a dummy URL for the API payload.
-        # In a local/test environment, the actual download will fail at Meta's side unless a tunnel is used,
-        # but the API request must still be structurally valid. For testing, calls are mocked.
         if not (reel_path.startswith("http://") or reel_path.startswith("https://")):
             if not os.path.exists(reel_path):
                 raise FileNotFoundError(f"Reel video file not found at: {reel_path}")
-            filename = os.path.basename(reel_path)
-            video_url = f"https://dummy-public-url.com/reels/{filename}"
+            # Upload local file to a public temporary host so Meta's servers can download it
+            video_url = await self._upload_to_temp_host(reel_path)
         else:
             video_url = reel_path
 
@@ -183,3 +180,45 @@ class InstagramPublisher:
                 "instagram_permalink": permalink,
                 "instagram_published_at": datetime.now(timezone.utc),
             }
+
+    async def _upload_to_temp_host(self, file_path: str) -> str:
+        """Upload local file to a temporary public hosting service to get a public URL for Meta API."""
+        logger.info("uploading_video_to_temp_host_started", file_path=file_path)
+        
+        # 1. Try tmpfiles.org
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                with open(file_path, "rb") as f:
+                    files = {"file": (os.path.basename(file_path), f, "video/mp4")}
+                    resp = await client.post("https://tmpfiles.org/api/v1/upload", files=files)
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("status") == "success":
+                        url = data.get("data", {}).get("url")
+                        if url:
+                            direct_url = url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+                            logger.info("uploading_video_to_temp_host_success_tmpfiles", url=direct_url)
+                            return direct_url
+        except Exception as e:
+            logger.warning("upload_to_tmpfiles_failed", error=str(e))
+
+        # 2. Try catbox.moe as fallback
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                with open(file_path, "rb") as f:
+                    data = {
+                        "reqtype": "fileupload"
+                    }
+                    files = {"fileToUpload": (os.path.basename(file_path), f, "video/mp4")}
+                    resp = await client.post("https://catbox.moe/user/api.php", data=data, files=files)
+                
+                if resp.status_code == 200:
+                    url = resp.text.strip()
+                    if url.startswith("http://") or url.startswith("https://"):
+                        logger.info("uploading_video_to_temp_host_success_catbox", url=url)
+                        return url
+        except Exception as e:
+            logger.warning("upload_to_catbox_failed", error=str(e))
+            
+        raise RuntimeError("Failed to upload video to temporary public hosting for Instagram.")
