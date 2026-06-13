@@ -385,6 +385,7 @@ async def generate_reel(state: ArtworkWorkflowState) -> dict[str, Any]:
                 image_path=state["image_path"],
                 output_path=output_path,
                 reel_script=result.data,
+                analysis=state.get("analysis"),
             )
             logger.info("reel_render_completed", artwork_id=artwork_id, workflow_id=workflow_id, reel_path=reel_path)
         except Exception as render_exc:
