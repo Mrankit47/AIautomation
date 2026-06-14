@@ -85,13 +85,43 @@ class ArtworkAnalyzerAgent(BaseAgent):
                 f"{prompt_template.system_prompt}\n\n{rendered_prompt}"
             )
 
-            # Call Gemini vision API
-            provider = GeminiProvider()
-            result = await provider.analyze_image(
-                image_data=image_data,
-                prompt=full_prompt,
-                mime_type=mime_type,
-            )
+            # Call Gemini vision API with fallback to Groq on failure
+            analysis_data = None
+            try:
+                provider = GeminiProvider()
+                result = await provider.analyze_image(
+                    image_data=image_data,
+                    prompt=full_prompt,
+                    mime_type=mime_type,
+                )
+                analysis_data = result.metadata
+            except Exception as gemini_exc:
+                logger.warning(
+                    "gemini_analysis_failed_falling_back_to_groq",
+                    artwork_id=artwork_id,
+                    error=str(gemini_exc),
+                )
+                try:
+                    from backend.providers.groq import GroqProvider
+                    groq_provider = GroqProvider()
+                    result = await groq_provider.analyze_image(
+                        image_data=image_data,
+                        prompt=full_prompt,
+                        mime_type=mime_type,
+                    )
+                    analysis_data = result.metadata
+                except Exception as groq_exc:
+                    logger.error(
+                        "groq_fallback_failed",
+                        artwork_id=artwork_id,
+                        error=str(groq_exc),
+                    )
+                    return AgentResult(
+                        success=False,
+                        error=f"Both Gemini and Groq fallback failed. Gemini error: {gemini_exc}. Groq error: {groq_exc}",
+                        agent_name=self.name,
+                        execution_time_ms=(time.monotonic() - start_time) * 1000,
+                    )
 
             elapsed = (time.monotonic() - start_time) * 1000
             logger.info(
@@ -102,7 +132,7 @@ class ArtworkAnalyzerAgent(BaseAgent):
 
             return AgentResult(
                 success=True,
-                data=result.metadata,  # The full parsed JSON
+                data=analysis_data,  # The full parsed JSON
                 agent_name=self.name,
                 execution_time_ms=elapsed,
             )

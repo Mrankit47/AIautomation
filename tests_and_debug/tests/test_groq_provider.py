@@ -7,7 +7,7 @@ import pytest
 
 from backend.config.settings import get_settings
 from backend.core.exceptions import AIProviderException
-from backend.providers.base import AIStructuredResult, AITextResult
+from backend.providers.base import AIStructuredResult, AITextResult, AIImageAnalysisResult
 from backend.providers.groq import GroqProvider
 
 
@@ -29,11 +29,29 @@ async def test_groq_provider_init_and_name(mock_groq_env) -> None:
 
 
 @pytest.mark.asyncio
-async def test_groq_provider_analyze_image_raises(mock_groq_env) -> None:
-    """Test analyze_image raises NotImplementedError for Groq."""
+async def test_groq_provider_analyze_image_success(mock_groq_env) -> None:
+    """Test analyze_image returns AIImageAnalysisResult using fallback or vision."""
     provider = GroqProvider()
-    with pytest.raises(NotImplementedError):
-        await provider.analyze_image(b"fake-image-bytes", "fake-prompt")
+    
+    mock_choice = MagicMock()
+    mock_choice.message.content = '{"style": "anime", "mood": "happy", "primary_colors": ["red"], "objects": ["flower"], "category": "anime"}'
+    
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+    mock_response.usage.prompt_tokens = 50
+    mock_response.usage.completion_tokens = 60
+    mock_response.usage.total_tokens = 110
+    mock_response.model_dump.return_value = {"mock": "data"}
+
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create.return_value = mock_response
+    provider._client = mock_client
+
+    result = await provider.analyze_image(b"fake-image-bytes", "fake-prompt")
+    
+    assert isinstance(result, AIImageAnalysisResult)
+    assert result.metadata["style"] == "anime"
+    assert result.metadata["mood"] == "happy"
 
 
 @pytest.mark.asyncio
@@ -123,7 +141,7 @@ async def test_groq_provider_generate_text_failure_and_retries(mock_groq_env) ->
     mock_client.chat.completions.create.side_effect = Exception("Groq RateLimitError")
     provider._client = mock_client
 
-    with patch("time.sleep") as mock_sleep:  # bypass sleeping in tests
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:  # bypass sleeping in tests
         with pytest.raises(AIProviderException) as excinfo:
             await provider.generate_text("test prompt")
         

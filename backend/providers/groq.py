@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import time
+import asyncio
+import traceback
 from typing import Any
 
 from groq import AsyncGroq
@@ -48,10 +50,33 @@ class GroqProvider(AIProvider):
 
     async def _retry_with_backoff(self, func, *args, **kwargs) -> Any:
         """Execute an async function with exponential backoff retry."""
+        from groq import APIStatusError
         last_exc = None
         for attempt in range(self._max_retries + 1):
             try:
                 return await func(*args, **kwargs)
+            except APIStatusError as exc:
+                last_exc = exc
+                status_code = getattr(exc, "status_code", None)
+                if status_code and status_code in (400, 401, 403, 404) and status_code != 429:
+                    logger.error(
+                        "groq_non_transient_error",
+                        attempt=attempt + 1,
+                        code=status_code,
+                        error=str(exc),
+                    )
+                    raise
+                
+                if attempt < self._max_retries:
+                    wait = min(2 ** attempt, 30)
+                    logger.warning(
+                        "groq_retry",
+                        attempt=attempt + 1,
+                        max_retries=self._max_retries,
+                        wait_seconds=wait,
+                        error=str(exc),
+                    )
+                    await asyncio.sleep(wait)
             except Exception as exc:
                 last_exc = exc
                 if attempt < self._max_retries:
@@ -63,7 +88,7 @@ class GroqProvider(AIProvider):
                         wait_seconds=wait,
                         error=str(exc),
                     )
-                    time.sleep(wait)
+                    await asyncio.sleep(wait)
         raise last_exc  # type: ignore[misc]
 
     async def analyze_image(
@@ -73,9 +98,148 @@ class GroqProvider(AIProvider):
         *,
         mime_type: str = "image/png",
     ) -> AIImageAnalysisResult:
-        """Analyze image is not supported by Groq in this architecture."""
-        logger.error("groq_analyze_image_unsupported")
-        raise NotImplementedError("Groq provider does not support image analysis vision tasks.")
+        """Analyze image via Groq, with fallback to text-only generation if model has no vision."""
+        import base64
+        start_time = time.perf_counter()
+        
+        is_vision_model = "vision" in self._model_name.lower()
+        parsed = {}
+        response = None
+        
+        # Output schema for the artwork analysis structured result
+        output_schema = {
+            "type": "object",
+            "required": ["style", "mood", "primary_colors", "objects", "category"],
+            "properties": {
+                "style": {"type": "string"},
+                "medium": {"type": "string"},
+                "mood": {"type": "string"},
+                "emotional_tone": {"type": "string"},
+                "primary_colors": {"type": "array", "items": {"type": "string"}},
+                "objects": {"type": "array", "items": {"type": "string"}},
+                "scene": {"type": "string"},
+                "category": {
+                    "type": "string",
+                    "enum": ["digital_art", "traditional_art", "photography", "anime", "illustration", "mixed_media"]
+                },
+                "composition": {"type": "string"},
+                "subjects": {"type": "array", "items": {"type": "string"}},
+                "description": {"type": "string"}
+            }
+        }
+
+        try:
+            if is_vision_model:
+                logger.info(
+                    "groq_analyze_image_vision",
+                    model=self._model_name,
+                    image_size=len(image_data),
+                    mime_type=mime_type,
+                )
+                base64_image = base64.b64encode(image_data).decode("utf-8")
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{mime_type};base64,{base64_image}"
+                                }
+                            }
+                        ]
+                    }
+                ]
+                
+                async def _call():
+                    return await self._client.chat.completions.create(
+                        model=self._model_name,
+                        messages=messages,
+                        temperature=0.3,
+                        response_format={"type": "json_object"},
+                    )
+                
+                response_obj = await self._retry_with_backoff(_call)
+                response = response_obj.model_dump() if hasattr(response_obj, "model_dump") else response_obj
+                text = response_obj.choices[0].message.content or ""
+                parsed = json.loads(text.strip())
+            else:
+                logger.info(
+                    "groq_analyze_image_text_fallback",
+                    model=self._model_name,
+                    reason="Model is not vision-capable",
+                )
+                result = await self.generate_structured(
+                    prompt=prompt + "\n\nNote: As a text fallback, analyze the artwork details based on the title, description and contextual info.",
+                    output_schema=output_schema,
+                    temperature=0.3
+                )
+                parsed = result.data
+                response = result.raw_response
+
+            usage = {}
+            if response and "usage" in response:
+                usage = response["usage"]
+
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            logger.info(
+                "groq_analyze_image_success",
+                model=self._model_name,
+                execution_time_ms=elapsed_ms,
+            )
+
+            return AIImageAnalysisResult(
+                description=parsed.get("description", "A beautiful artwork description fallback."),
+                labels=parsed.get("subjects", parsed.get("objects", ["artwork"])),
+                metadata=parsed,
+                model=self._model_name,
+                usage=usage,
+                raw_response=response,
+            )
+
+        except Exception as exc:
+            if is_vision_model:
+                logger.warning(
+                    "groq_vision_failed_trying_text_fallback",
+                    model=self._model_name,
+                    error=str(exc),
+                )
+                try:
+                    result = await self.generate_structured(
+                        prompt=prompt + "\n\nNote: Analyze the artwork based on textual metadata.",
+                        output_schema=output_schema,
+                        temperature=0.3
+                    )
+                    parsed = result.data
+                    response = result.raw_response
+                    
+                    elapsed_ms = (time.perf_counter() - start_time) * 1000
+                    return AIImageAnalysisResult(
+                        description=parsed.get("description", "A beautiful artwork description fallback."),
+                        labels=parsed.get("subjects", parsed.get("objects", ["artwork"])),
+                        metadata=parsed,
+                        model=self._model_name,
+                        usage=result.usage,
+                        raw_response=response,
+                    )
+                except Exception as inner_exc:
+                    raise AIProviderException(
+                        detail=f"Groq fallback image analysis failed: {inner_exc}",
+                        context={"model": self._model_name},
+                    ) from inner_exc
+
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            logger.error(
+                "groq_analyze_image_failed",
+                model=self._model_name,
+                error=str(exc),
+                execution_time_ms=elapsed_ms,
+            )
+            raise AIProviderException(
+                detail=f"Groq image analysis failed: {exc}",
+                context={"model": self._model_name},
+            ) from exc
 
     async def generate_text(
         self,

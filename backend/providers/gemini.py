@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import json
 import time
+import asyncio
+import traceback
 from typing import Any
 
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError
 
 from backend.config.settings import get_settings
 from backend.core.exceptions import AIProviderException
@@ -52,6 +55,29 @@ class GeminiProvider(AIProvider):
         for attempt in range(self._max_retries + 1):
             try:
                 return await func(*args, **kwargs)
+            except APIError as exc:
+                last_exc = exc
+                status_code = getattr(exc, "code", None)
+                # Client errors (4xx) except 429 are typically non-transient
+                if status_code and status_code in (400, 401, 403, 404) and status_code != 429:
+                    logger.error(
+                        "gemini_non_transient_error",
+                        attempt=attempt + 1,
+                        code=status_code,
+                        error=str(exc),
+                    )
+                    raise
+                
+                if attempt < self._max_retries:
+                    wait = min(2 ** attempt, 30)
+                    logger.warning(
+                        "gemini_retry",
+                        attempt=attempt + 1,
+                        max_retries=self._max_retries,
+                        wait_seconds=wait,
+                        error=str(exc),
+                    )
+                    await asyncio.sleep(wait)
             except Exception as exc:
                 last_exc = exc
                 if attempt < self._max_retries:
@@ -63,7 +89,7 @@ class GeminiProvider(AIProvider):
                         wait_seconds=wait,
                         error=str(exc),
                     )
-                    time.sleep(wait)
+                    await asyncio.sleep(wait)
         raise last_exc  # type: ignore[misc]
 
     def _parse_json_from_text(self, text: str) -> dict[str, Any]:
@@ -141,15 +167,25 @@ class GeminiProvider(AIProvider):
 
         except Exception as exc:
             elapsed_ms = (time.perf_counter() - start_time) * 1000
+            stack_trace = traceback.format_exc()
+            http_status = getattr(exc, "code", None)
+            response_body = getattr(exc, "message", None)
             logger.error(
                 "gemini_analyze_image_failed",
                 model=self._model_name,
                 error=str(exc),
+                stack_trace=stack_trace,
+                http_status=http_status,
+                response_body=response_body,
                 execution_time_ms=elapsed_ms,
             )
             raise AIProviderException(
                 detail=f"Gemini image analysis failed: {exc}",
-                context={"model": self._model_name},
+                context={
+                    "model": self._model_name,
+                    "http_status": http_status,
+                    "response_body": response_body,
+                },
             ) from exc
 
     async def generate_text(
@@ -210,15 +246,25 @@ class GeminiProvider(AIProvider):
 
         except Exception as exc:
             elapsed_ms = (time.perf_counter() - start_time) * 1000
+            stack_trace = traceback.format_exc()
+            http_status = getattr(exc, "code", None)
+            response_body = getattr(exc, "message", None)
             logger.error(
                 "gemini_generate_text_failed",
                 model=self._model_name,
                 error=str(exc),
+                stack_trace=stack_trace,
+                http_status=http_status,
+                response_body=response_body,
                 execution_time_ms=elapsed_ms,
             )
             raise AIProviderException(
                 detail=f"Gemini text generation failed: {exc}",
-                context={"model": self._model_name},
+                context={
+                    "model": self._model_name,
+                    "http_status": http_status,
+                    "response_body": response_body,
+                },
             ) from exc
 
     async def generate_structured(
@@ -287,10 +333,12 @@ class GeminiProvider(AIProvider):
 
         except json.JSONDecodeError as exc:
             elapsed_ms = (time.perf_counter() - start_time) * 1000
+            stack_trace = traceback.format_exc()
             logger.error(
                 "gemini_json_parse_failed",
                 model=self._model_name,
                 error=str(exc),
+                stack_trace=stack_trace,
                 execution_time_ms=elapsed_ms,
             )
             raise AIProviderException(
@@ -299,15 +347,25 @@ class GeminiProvider(AIProvider):
             ) from exc
         except Exception as exc:
             elapsed_ms = (time.perf_counter() - start_time) * 1000
+            stack_trace = traceback.format_exc()
+            http_status = getattr(exc, "code", None)
+            response_body = getattr(exc, "message", None)
             logger.error(
                 "gemini_generate_structured_failed",
                 model=self._model_name,
                 error=str(exc),
+                stack_trace=stack_trace,
+                http_status=http_status,
+                response_body=response_body,
                 execution_time_ms=elapsed_ms,
             )
             raise AIProviderException(
                 detail=f"Gemini structured generation failed: {exc}",
-                context={"model": self._model_name},
+                context={
+                    "model": self._model_name,
+                    "http_status": http_status,
+                    "response_body": response_body,
+                },
             ) from exc
 
     async def health_check(self) -> bool:
