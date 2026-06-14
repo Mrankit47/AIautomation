@@ -59,6 +59,7 @@ async def test_instagram_publisher_service_success() -> None:
         "INSTAGRAM_ACCOUNT_ID": "test-account-id"
     }):
         publisher = InstagramPublisher()
+        publisher._upload_to_temp_host = AsyncMock(return_value="https://public-host/temp.mp4")
 
         # Mock responses using spec=httpx.Response to avoid coroutine issues
         mock_resp_create = MagicMock(spec=httpx.Response)

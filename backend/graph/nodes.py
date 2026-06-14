@@ -132,13 +132,156 @@ def _update_artwork_multiple_fields(
                 setattr(art, k, v)
             if status:
                 val = getattr(status, "value", status).upper()
-                art.status = ArtworkStatus(val)
+                # Enforce Phase 8 State Machine transitions
+                art.transition_to(ArtworkStatus(val))
             session.commit()
     except Exception as exc:
         logger.error("db_update_artwork_multiple_fields_failed", artwork_id=artwork_id, error=str(exc))
         session.rollback()
+        raise
     finally:
         session.close()
+
+
+# ── Phase 5: Workflow Event Emission ─────────────────────────────────────────
+
+
+def _emit_event(
+    workflow_run_id: str,
+    node_name: str,
+    event_type: str,
+    started_at: datetime | None = None,
+    completed_at: datetime | None = None,
+    duration_ms: int | None = None,
+    error_message: str | None = None,
+    attempt_number: int = 1,
+    metadata: dict | None = None,
+) -> None:
+    """Create a WorkflowEvent record for node execution tracking.
+
+    This provides a full audit trail of every node execution in the
+    workflow, including timing data, errors, and retry attempts.
+    """
+    from backend.database.session import get_sync_session
+    from backend.models.workflow_event import WorkflowEvent
+    from datetime import datetime as dt, timezone as tz
+
+    session = get_sync_session()
+    try:
+        event = WorkflowEvent(
+            workflow_run_id=uuid.UUID(workflow_run_id),
+            node_name=node_name,
+            event_type=event_type,
+            started_at=started_at or dt.now(tz.utc),
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+            error_message=error_message,
+            attempt_number=attempt_number,
+            event_metadata=metadata,
+        )
+        session.add(event)
+        session.commit()
+    except Exception as exc:
+        logger.error(
+            "emit_event_failed",
+            node=node_name,
+            event_type=event_type,
+            error=str(exc),
+        )
+        session.rollback()
+    finally:
+        session.close()
+
+
+# ── Phase 6: Retry Helper for Publishing Nodes ──────────────────────────────
+
+
+import asyncio
+import time
+
+
+async def _retry_on_transient(
+    coro_factory,
+    node_name: str,
+    workflow_run_id: str,
+    max_retries: int = 3,
+    base_delay: float = 5.0,
+):
+    """Retry an async operation with exponential backoff for transient errors.
+
+    Args:
+        coro_factory: Callable that returns a new coroutine to retry.
+        node_name: Name of the node for event logging.
+        workflow_run_id: Workflow run ID for event tracking.
+        max_retries: Maximum number of retries.
+        base_delay: Base delay in seconds (doubles each retry).
+
+    Returns:
+        The result of the coroutine if successful.
+
+    Raises:
+        The last exception if all retries are exhausted.
+    """
+    # Non-retryable error types (auth failures, invalid media, etc.)
+    non_retryable = (
+        "AuthenticationException",
+        "AuthorizationException",
+        "ValidationException",
+    )
+
+    last_exc = None
+    for attempt in range(1, max_retries + 2):  # +2 for initial attempt + retries
+        start = time.monotonic()
+        try:
+            result = await coro_factory()
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            _emit_event(
+                workflow_run_id=workflow_run_id,
+                node_name=node_name,
+                event_type="completed",
+                duration_ms=elapsed_ms,
+                attempt_number=attempt,
+            )
+            return result
+        except Exception as exc:
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            last_exc = exc
+
+            # Check if error is non-retryable
+            exc_name = type(exc).__name__
+            if exc_name in non_retryable or attempt > max_retries:
+                _emit_event(
+                    workflow_run_id=workflow_run_id,
+                    node_name=node_name,
+                    event_type="failed",
+                    duration_ms=elapsed_ms,
+                    error_message=str(exc),
+                    attempt_number=attempt,
+                )
+                raise
+
+            # Retryable error — log and wait
+            delay = base_delay * (2 ** (attempt - 1))
+            logger.warning(
+                "node_retry",
+                node=node_name,
+                attempt=attempt,
+                max_retries=max_retries,
+                delay=delay,
+                error=str(exc),
+            )
+            _emit_event(
+                workflow_run_id=workflow_run_id,
+                node_name=node_name,
+                event_type="retrying",
+                duration_ms=elapsed_ms,
+                error_message=str(exc),
+                attempt_number=attempt,
+                metadata={"next_delay_seconds": delay},
+            )
+            await asyncio.sleep(delay)
+
+    raise last_exc  # Should never reach here, but safety net
 
 
 # ── Pipeline Nodes ───────────────────────────────────────────────────────────
@@ -150,6 +293,10 @@ async def analyze_artwork(state: ArtworkWorkflowState) -> dict[str, Any]:
     workflow_id = state["workflow_id"]
     logger.info("node_execute", node="analyze_artwork", artwork_id=artwork_id)
     _update_run_node(workflow_id, "analyze_artwork")
+    _emit_event(workflow_id, "analyze_artwork", "started")
+    # Enforce state machine transition: UPLOADED -> ANALYZING
+    _update_artwork_multiple_fields(artwork_id, {}, status="analyzing")
+    node_start = time.monotonic()
 
     try:
         # Load the artwork title from DB
@@ -182,6 +329,9 @@ async def analyze_artwork(state: ArtworkWorkflowState) -> dict[str, Any]:
 
         # Save to database and set artwork status to processing
         _update_artwork_multiple_fields(artwork_id, {"analysis_data": result.data}, status="processing")
+
+        elapsed_ms = int((time.monotonic() - node_start) * 1000)
+        _emit_event(workflow_id, "analyze_artwork", "completed", duration_ms=elapsed_ms)
 
         return {
             "analysis": result.data,
@@ -439,6 +589,8 @@ async def publish_instagram(state: ArtworkWorkflowState) -> dict[str, Any]:
     workflow_id = state["workflow_id"]
     logger.info("instagram_publish_started", artwork_id=artwork_id, workflow_id=workflow_id)
     _update_run_node(workflow_id, "publish_instagram")
+    _emit_event(workflow_id, "publish_instagram", "started")
+    node_start = time.monotonic()
     _update_run_publishing_status(workflow_id, "instagram", "pending")
     _update_artwork_multiple_fields(artwork_id, {"instagram_status": "pending"})
 
@@ -473,7 +625,18 @@ async def publish_instagram(state: ArtworkWorkflowState) -> dict[str, Any]:
         # Instantiate service and publish
         from backend.services.instagram_publisher import InstagramPublisher
         publisher = InstagramPublisher()
-        result = await publisher.publish_reel(reel_path, caption)
+
+        async def _publish_op():
+            return await publisher.publish_reel(reel_path, caption)
+
+        # Enforce retry system logic (Phase 6)
+        result = await _retry_on_transient(
+            coro_factory=_publish_op,
+            node_name="publish_instagram",
+            workflow_run_id=workflow_id,
+            max_retries=3,
+            base_delay=5.0,
+        )
 
         # Success - update fields and set status to published
         _update_artwork_multiple_fields(
@@ -495,6 +658,8 @@ async def publish_instagram(state: ArtworkWorkflowState) -> dict[str, Any]:
     except Exception as exc:
         logger.error("instagram_publish_failed", artwork_id=artwork_id, workflow_id=workflow_id, error=str(exc))
         err = _make_error("publish_instagram", exc)
+        elapsed_ms = int((time.monotonic() - node_start) * 1000)
+        _emit_event(workflow_id, "publish_instagram", "failed", duration_ms=elapsed_ms, error_message=str(exc))
         _update_run_node(workflow_id, "publish_instagram", status="failed", error_history=[err])
         _update_run_publishing_status(workflow_id, "instagram", "failed")
         _update_artwork_multiple_fields(artwork_id, {"instagram_status": "failed", "error_message": str(exc)})
@@ -512,6 +677,8 @@ async def publish_youtube(state: ArtworkWorkflowState) -> dict[str, Any]:
     workflow_id = state["workflow_id"]
     logger.info("youtube_publish_started", artwork_id=artwork_id, workflow_id=workflow_id)
     _update_run_node(workflow_id, "publish_youtube")
+    _emit_event(workflow_id, "publish_youtube", "started")
+    node_start = time.monotonic()
     _update_run_publishing_status(workflow_id, "youtube", "pending")
     _update_artwork_multiple_fields(artwork_id, {"youtube_status": "pending"})
 
@@ -546,10 +713,21 @@ async def publish_youtube(state: ArtworkWorkflowState) -> dict[str, Any]:
         # Instantiate service and publish
         from backend.services.youtube_publisher import YouTubePublisher
         publisher = YouTubePublisher()
-        result = await publisher.publish_short(
-            reel_path=reel_path,
-            title=title,
-            description=description,
+
+        async def _publish_op():
+            return await publisher.publish_short(
+                reel_path=reel_path,
+                title=title,
+                description=description,
+            )
+
+        # Enforce retry system logic (Phase 6)
+        result = await _retry_on_transient(
+            coro_factory=_publish_op,
+            node_name="publish_youtube",
+            workflow_run_id=workflow_id,
+            max_retries=3,
+            base_delay=5.0,
         )
 
         # Success - update fields and set status to published
@@ -572,6 +750,8 @@ async def publish_youtube(state: ArtworkWorkflowState) -> dict[str, Any]:
     except Exception as exc:
         logger.error("youtube_publish_failed", artwork_id=artwork_id, workflow_id=workflow_id, error=str(exc))
         err = _make_error("publish_youtube", exc)
+        elapsed_ms = int((time.monotonic() - node_start) * 1000)
+        _emit_event(workflow_id, "publish_youtube", "failed", duration_ms=elapsed_ms, error_message=str(exc))
         _update_run_node(workflow_id, "publish_youtube", status="failed", error_history=[err])
         _update_run_publishing_status(workflow_id, "youtube", "failed")
         _update_artwork_multiple_fields(artwork_id, {"youtube_status": "failed", "error_message": str(exc)})

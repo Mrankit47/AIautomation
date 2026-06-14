@@ -117,7 +117,7 @@ class ReelGenerator:
         if not os.path.exists(image_path):
             raise FileNotFoundError(f"Source image not found: {image_path}")
 
-        img = Image.open(image_path)
+        img = Image.open(image_path).convert("RGB")
         orig_w, orig_h = img.size
 
         # Vertical target: 1080x1920

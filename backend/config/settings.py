@@ -27,14 +27,52 @@ class DatabaseSettings(BaseModel):
     name: str = "artwork_automation"
     pool_size: int = 20
     max_overflow: int = 10
+    url: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_database_url(cls, data: Any) -> Any:
+        import os
+        if not isinstance(data, dict):
+            return data
+        
+        url_val = data.get("url") or os.getenv("DATABASE_URL")
+        if url_val:
+            from urllib.parse import urlparse
+            parsed = urlparse(url_val)
+            if parsed.scheme.startswith("postgres"):
+                data["host"] = parsed.hostname or data.get("host", "localhost")
+                data["port"] = parsed.port or data.get("port", 5432)
+                data["user"] = parsed.username or data.get("user", "artwork_user")
+                data["password"] = parsed.password or data.get("password", "artwork_secret")
+                db_name = parsed.path.lstrip("/")
+                data["name"] = db_name or data.get("name", "artwork_automation")
+                data["url"] = url_val
+        return data
 
     @property
     def async_url(self) -> str:
+        if self.url:
+            url_str = self.url
+            if url_str.startswith("postgresql://"):
+                return url_str.replace("postgresql://", "postgresql+asyncpg://", 1)
+            elif url_str.startswith("postgres://"):
+                return url_str.replace("postgres://", "postgresql+asyncpg://", 1)
+            elif url_str.startswith("postgresql+asyncpg://"):
+                return url_str
         pwd = self.password.get_secret_value()
         return f"postgresql+asyncpg://{self.user}:{pwd}@{self.host}:{self.port}/{self.name}"
 
     @property
     def sync_url(self) -> str:
+        if self.url:
+            url_str = self.url
+            if url_str.startswith("postgresql://"):
+                return url_str.replace("postgresql://", "postgresql+psycopg2://", 1)
+            elif url_str.startswith("postgres://"):
+                return url_str.replace("postgres://", "postgresql+psycopg2://", 1)
+            elif url_str.startswith("postgresql+psycopg2://"):
+                return url_str
         pwd = self.password.get_secret_value()
         return f"postgresql+psycopg2://{self.user}:{pwd}@{self.host}:{self.port}/{self.name}"
 
@@ -46,9 +84,32 @@ class RedisSettings(BaseModel):
     port: int = 6379
     db: int = 0
     password: SecretStr | None = None
+    url_override: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_redis_url(cls, data: Any) -> Any:
+        import os
+        if not isinstance(data, dict):
+            return data
+        
+        url_val = data.get("url") or os.getenv("REDIS_URL")
+        if url_val:
+            from urllib.parse import urlparse
+            parsed = urlparse(url_val)
+            data["host"] = parsed.hostname or data.get("host", "localhost")
+            data["port"] = parsed.port or data.get("port", 6379)
+            if parsed.password:
+                data["password"] = parsed.password
+            db_path = parsed.path.lstrip("/")
+            data["db"] = int(db_path) if db_path.isdigit() else data.get("db", 0)
+            data["url_override"] = url_val
+        return data
 
     @property
     def url(self) -> str:
+        if self.url_override:
+            return self.url_override
         if self.password:
             return f"redis://:{self.password.get_secret_value()}@{self.host}:{self.port}/{self.db}"
         return f"redis://{self.host}:{self.port}/{self.db}"
@@ -203,6 +264,9 @@ class Settings(BaseSettings):
     groq_api_key: SecretStr = SecretStr("")
     groq_model: str = "llama-3.3-70b-versatile"
 
+    # Webhook Authentication (Phase 7)
+    webhook_api_key: str = ""
+
     # Subsystem settings
     postgres: DatabaseSettings = Field(default_factory=DatabaseSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
@@ -217,6 +281,27 @@ class Settings(BaseSettings):
     storage: StorageSettings = Field(default_factory=StorageSettings)
     prompts: PromptSettings = Field(default_factory=PromptSettings)
     feature_flags: FeatureFlagSettings = Field(default_factory=FeatureFlagSettings)
+
+    @model_validator(mode="after")
+    def configure_celery_urls(self) -> Settings:
+        import os
+        redis_url = self.redis.url
+        if os.getenv("REDIS_URL") or self.redis.host != "localhost":
+            if "localhost" in self.celery.broker_url:
+                base_url = redis_url.rstrip("/")
+                from urllib.parse import urlparse
+                parsed = urlparse(base_url)
+                if parsed.path and parsed.path != "/":
+                    base_url = base_url.rsplit("/", 1)[0]
+                self.celery.broker_url = f"{base_url}/1"
+            if "localhost" in self.celery.result_backend:
+                base_url = redis_url.rstrip("/")
+                from urllib.parse import urlparse
+                parsed = urlparse(base_url)
+                if parsed.path and parsed.path != "/":
+                    base_url = base_url.rsplit("/", 1)[0]
+                self.celery.result_backend = f"{base_url}/2"
+        return self
 
     @field_validator("app_env")
     @classmethod

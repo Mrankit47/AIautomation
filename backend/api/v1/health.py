@@ -93,3 +93,68 @@ async def readiness(
         overall = "unhealthy"
 
     return HealthReadyResponse(status=overall, services=services)
+
+
+@router.get("/workflow")
+async def workflow_health(
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Workflow health — aggregate stats for the last 24 hours.
+
+    Returns counts of workflows by status, average duration,
+    and the last workflow completion time.
+    """
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func, case
+    from backend.models.workflow_run import WorkflowRun
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+
+    # Count by status
+    result = await session.execute(
+        text("""
+            SELECT
+                status,
+                COUNT(*) as count
+            FROM workflow_runs
+            WHERE created_at >= :cutoff
+            GROUP BY status
+        """),
+        {"cutoff": cutoff},
+    )
+    status_counts = {row[0]: row[1] for row in result.fetchall()}
+
+    # Average duration of completed workflows
+    avg_result = await session.execute(
+        text("""
+            SELECT AVG(EXTRACT(EPOCH FROM (completed_at - started_at)))
+            FROM workflow_runs
+            WHERE status = 'COMPLETED'
+            AND started_at IS NOT NULL
+            AND completed_at IS NOT NULL
+            AND created_at >= :cutoff
+        """),
+        {"cutoff": cutoff},
+    )
+    avg_duration = avg_result.scalar()
+ 
+    # Last completion time
+    last_result = await session.execute(
+        text("""
+            SELECT MAX(completed_at)
+            FROM workflow_runs
+            WHERE status = 'COMPLETED'
+        """),
+    )
+    last_completed = last_result.scalar()
+
+    return {
+        "period": "last_24h",
+        "total": sum(status_counts.values()),
+        "pending": status_counts.get("PENDING", 0),
+        "running": status_counts.get("RUNNING", 0),
+        "completed": status_counts.get("COMPLETED", 0),
+        "failed": status_counts.get("FAILED", 0),
+        "average_duration_seconds": round(avg_duration, 2) if avg_duration else None,
+        "last_completed_at": last_completed.isoformat() if last_completed else None,
+    }

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -69,16 +69,20 @@ async def test_upload_artwork_api(
     # Since we mocked mock_db_session.get and repository functions, we let the service run.
     from backend.database.repository import BaseRepository
     BaseRepository.create = AsyncMock(return_value=mock_artwork)
+    BaseRepository.filter_by = AsyncMock(return_value=[])
 
-    response = await client.post(
-        "/api/v1/artworks/upload",
-        files=files,
-        data=data,
-        headers=auth_headers,
-    )
+    with patch("backend.services.artwork_service.ArtworkService._auto_trigger_workflow") as mock_trigger:
+        mock_trigger.return_value = (uuid.uuid4(), "mock-task-id")
 
-    assert response.status_code == 201
-    assert response.json()["original_filename"] == "sunset.png"
+        response = await client.post(
+            "/api/v1/artworks/upload",
+            files=files,
+            data=data,
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 201
+        assert response.json()["original_filename"] == "sunset.png"
 
 
 @pytest.mark.asyncio

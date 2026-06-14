@@ -88,12 +88,31 @@ def _mark_completed(
             return
 
         from backend.models.workflow_run import WorkflowStatus
+        from backend.models.artwork import ArtworkStatus
+        
         if status.upper() == "COMPLETED_WITH_WARNINGS":
             run.status = WorkflowStatus.COMPLETED_WITH_WARNINGS
+            art_status = ArtworkStatus.COMPLETED_WITH_WARNINGS
         else:
             run.status = WorkflowStatus.COMPLETED
+            art_status = ArtworkStatus.COMPLETED
+            
         run.completed_at = datetime.now(timezone.utc)
         run.result = result_data
+        
+        if run.artwork and run.artwork.status not in (ArtworkStatus.COMPLETED, ArtworkStatus.COMPLETED_WITH_WARNINGS, ArtworkStatus.FAILED):
+            try:
+                run.artwork.transition_to(art_status)
+                run.artwork.error_message = None  # Clear previous error message
+            except Exception as e:
+                logger.error(
+                    "failed_to_transition_artwork_status",
+                    workflow_run_id=str(workflow_run_id),
+                    artwork_id=str(run.artwork.id),
+                    current_status=run.artwork.status.value,
+                    target_status=art_status.value,
+                    error=str(e),
+                )
         session.commit()
     except Exception:
         session.rollback()
@@ -120,9 +139,25 @@ def _mark_failed(
             )
             return
 
+        from backend.models.artwork import ArtworkStatus
         run.status = WorkflowStatus.FAILED
         run.completed_at = datetime.now(timezone.utc)
         run.error_message = error
+        
+        if run.artwork and run.artwork.status not in (ArtworkStatus.COMPLETED, ArtworkStatus.COMPLETED_WITH_WARNINGS, ArtworkStatus.FAILED):
+            try:
+                run.artwork.transition_to(ArtworkStatus.FAILED)
+                if not run.artwork.error_message:
+                    run.artwork.error_message = error
+            except Exception as e:
+                logger.error(
+                    "failed_to_transition_artwork_status",
+                    workflow_run_id=str(workflow_run_id),
+                    artwork_id=str(run.artwork.id),
+                    current_status=run.artwork.status.value,
+                    target_status="FAILED",
+                    error=str(e),
+                )
         session.commit()
     except Exception:
         session.rollback()

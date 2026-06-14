@@ -35,6 +35,27 @@ for _member in ArtworkStatus:
         )
 
 
+# ── Phase 8: Strict State Machine Transitions ────────────────────────────
+VALID_STATUS_TRANSITIONS: dict[ArtworkStatus, set[ArtworkStatus]] = {
+    ArtworkStatus.UPLOADED: {ArtworkStatus.ANALYZING, ArtworkStatus.FAILED},
+    ArtworkStatus.ANALYZING: {ArtworkStatus.PROCESSING, ArtworkStatus.FAILED},
+    ArtworkStatus.PROCESSING: {
+        ArtworkStatus.PUBLISHING,
+        ArtworkStatus.COMPLETED,
+        ArtworkStatus.COMPLETED_WITH_WARNINGS,
+        ArtworkStatus.FAILED,
+    },
+    ArtworkStatus.PUBLISHING: {
+        ArtworkStatus.COMPLETED,
+        ArtworkStatus.COMPLETED_WITH_WARNINGS,
+        ArtworkStatus.FAILED,
+    },
+    ArtworkStatus.COMPLETED: set(),  # Terminal state
+    ArtworkStatus.COMPLETED_WITH_WARNINGS: set(),  # Terminal state
+    ArtworkStatus.FAILED: {ArtworkStatus.UPLOADED, ArtworkStatus.ANALYZING},  # Allow re-processing or direct retry
+}
+
+
 
 
 class Artwork(UUIDMixin, TimestampMixin, Base):
@@ -72,14 +93,27 @@ class Artwork(UUIDMixin, TimestampMixin, Base):
 
     @hybrid_property
     def status(self) -> ArtworkStatus:
-        if self._db_status == ArtworkStatus.COMPLETED:
+        db_status = self._db_status
+        if isinstance(db_status, str):
+            db_status = ArtworkStatus(db_status)
+        if db_status == ArtworkStatus.COMPLETED:
             for run in self.workflow_runs:
-                if getattr(run, "status", None) == "completed_with_warnings":
+                # Normalise string comparison if workflow_run status is string
+                run_status = getattr(run, "status", None)
+                if isinstance(run_status, str):
+                    run_status_str = run_status.upper()
+                elif run_status:
+                    run_status_str = getattr(run_status, "value", str(run_status)).upper()
+                else:
+                    run_status_str = ""
+                if run_status_str in ("COMPLETED_WITH_WARNINGS", "COMPLETED-WITH-WARNINGS"):
                     return ArtworkStatus.COMPLETED_WITH_WARNINGS
-        return self._db_status
+        return db_status
 
     @status.setter
     def status(self, value: ArtworkStatus) -> None:
+        if isinstance(value, str):
+            value = ArtworkStatus(value.upper())
         if value == ArtworkStatus.COMPLETED_WITH_WARNINGS:
             self._db_status = ArtworkStatus.COMPLETED
         else:
@@ -113,6 +147,16 @@ class Artwork(UUIDMixin, TimestampMixin, Base):
     # ── Error Tracking ───────────────────────────────────────────────────
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # ── Idempotency (Phase 3) ────────────────────────────────────────────
+    image_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True,
+        comment="SHA-256 hash of file bytes for duplicate detection",
+    )
+    source_url: Mapped[str | None] = mapped_column(
+        String(2000), nullable=True,
+        comment="Original URL if ingested via webhook",
+    )
+
     # ── Relationships ────────────────────────────────────────────────────
     workflow_runs: Mapped[list["WorkflowRun"]] = relationship(
         "WorkflowRun",
@@ -126,6 +170,41 @@ class Artwork(UUIDMixin, TimestampMixin, Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+
+    # ── Phase 8: State Machine ────────────────────────────────────────────
+
+    def transition_to(self, new_status: ArtworkStatus) -> None:
+        """Enforce strict status lifecycle transitions.
+
+        Args:
+            new_status: The status to transition to.
+
+        Raises:
+            WorkflowException: If the transition is invalid.
+        """
+        from backend.core.exceptions import WorkflowException
+
+        current = self.status
+        if current == new_status:
+            return
+
+        allowed = VALID_STATUS_TRANSITIONS.get(current, set())
+
+        if new_status not in allowed:
+            raise WorkflowException(
+                detail=(
+                    f"Invalid status transition: {current.value} → {new_status.value}. "
+                    f"Allowed transitions from {current.value}: "
+                    f"{', '.join(s.value for s in allowed) or 'none (terminal state)'}."
+                ),
+                context={
+                    "artwork_id": str(self.id),
+                    "current_status": current.value,
+                    "requested_status": new_status.value,
+                },
+            )
+
+        self.status = new_status
 
     def __repr__(self) -> str:
         return f"<Artwork id={self.id} status={self.status.value}>"

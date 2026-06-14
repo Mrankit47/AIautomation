@@ -47,6 +47,12 @@ class ArtworkResponse(BaseModel):
     youtube_url: str | None = None
     youtube_published_at: datetime | None = None
     error_message: str | None = None
+    # ── Idempotency (Phase 3) ────────────────────────────────────────────
+    image_hash: str | None = None
+    source_url: str | None = None
+    # ── Auto-Trigger Info (Phase 1) ──────────────────────────────────────
+    workflow_run_id: uuid.UUID | None = None
+    celery_task_id: str | None = None
     created_at: datetime
     updated_at: datetime
 

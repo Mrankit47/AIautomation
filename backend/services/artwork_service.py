@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import uuid
 from typing import Any
@@ -11,7 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.core.exceptions import NotFoundException, ValidationException
 from backend.core.logging import get_logger
 from backend.database.repository import BaseRepository
+from backend.feature_flags.config import get_workflow_version
 from backend.models.artwork import Artwork, ArtworkStatus
+from backend.models.workflow_run import WorkflowRun, WorkflowStatus
 from backend.schemas.artwork import (
     ArtworkAnalysisResponse,
     ArtworkCaptionResponse,
@@ -38,8 +41,65 @@ class ArtworkService:
         storage: StorageBackend,
     ) -> None:
         self._repo = BaseRepository(Artwork, session)
+        self._workflow_repo = BaseRepository(WorkflowRun, session)
         self._storage = storage
         self._session = session
+
+    # ── Auto-Trigger Workflow (Phase 1) ──────────────────────────────────
+
+    async def _auto_trigger_workflow(
+        self,
+        artwork: Artwork,
+    ) -> tuple[uuid.UUID | None, str | None]:
+        """Auto-create WorkflowRun and dispatch Celery task after upload.
+
+        Returns:
+            (workflow_run_id, celery_task_id) tuple, or (None, None) on failure.
+        """
+        try:
+            from backend.tasks.workflow_task import execute_workflow
+
+            version = get_workflow_version()
+
+            # Create workflow run record
+            workflow_run = await self._workflow_repo.create(
+                artwork_id=artwork.id,
+                workflow_version=version,
+                status=WorkflowStatus.PENDING,
+                error_history=[],
+            )
+
+            # Dispatch Celery task
+            task = execute_workflow.delay(
+                str(workflow_run.id),
+                str(artwork.id),
+                version,
+            )
+
+            # Store celery task ID on the workflow run
+            await self._workflow_repo.update(
+                workflow_run.id,
+                celery_task_id=task.id,
+            )
+
+            logger.info(
+                "workflow_auto_triggered",
+                artwork_id=str(artwork.id),
+                workflow_run_id=str(workflow_run.id),
+                celery_task_id=task.id,
+                workflow_version=version,
+            )
+            return workflow_run.id, task.id
+
+        except Exception as exc:
+            logger.error(
+                "workflow_auto_trigger_failed",
+                artwork_id=str(artwork.id),
+                error=str(exc),
+            )
+            return None, None
+
+    # ── Upload ───────────────────────────────────────────────────────────
 
     async def upload_artwork(
         self,
@@ -47,17 +107,25 @@ class ArtworkService:
         filename: str,
         content_type: str,
         title: str | None = None,
+        source_url: str | None = None,
     ) -> ArtworkResponse:
-        """Upload and persist a new artwork.
+        """Upload and persist a new artwork with auto-trigger.
+
+        Phase 3 — Idempotency: computes SHA-256 hash and returns existing
+        artwork if a duplicate is detected.
+
+        Phase 1 — Auto-Start: after creating the artwork record, auto-creates
+        a WorkflowRun and dispatches the Celery workflow.
 
         Args:
             file_data: Raw file bytes.
             filename: Original filename.
             content_type: MIME type of the file.
             title: Optional user-provided title.
+            source_url: Original URL if ingested via webhook.
 
         Returns:
-            ArtworkResponse with the created record.
+            ArtworkResponse with the created (or existing) record.
 
         Raises:
             ValidationException: If file type or size is invalid.
@@ -71,17 +139,34 @@ class ArtworkService:
                 detail=f"File too large. Maximum: {MAX_FILE_SIZE // (1024 * 1024)} MB",
             )
 
-        # Generate storage path
+        # ── Phase 3: Duplicate Detection ─────────────────────────────────
+        image_hash = hashlib.sha256(file_data).hexdigest()
+
+        existing = await self._repo.filter_by(image_hash=image_hash)
+        if existing:
+            logger.info(
+                "duplicate_artwork_detected",
+                image_hash=image_hash,
+                existing_artwork_id=str(existing[0].id),
+            )
+            resp = ArtworkResponse.model_validate(existing[0])
+            # Populate workflow info from latest run if available
+            if existing[0].workflow_runs:
+                latest_run = existing[0].workflow_runs[-1]
+                resp.workflow_run_id = latest_run.id
+                resp.celery_task_id = latest_run.celery_task_id
+            return resp
+
+        # ── Save to storage ──────────────────────────────────────────────
         artwork_id = uuid.uuid4()
         ext = filename.rsplit(".", 1)[-1] if "." in filename else "png"
         storage_path = f"artworks/{artwork_id}.{ext}"
 
-        # Save to storage
         storage_result = await self._storage.save(
             file_data, storage_path, content_type
         )
 
-        # Create database record
+        # ── Create database record ───────────────────────────────────────
         artwork = await self._repo.create(
             id=artwork_id,
             title=title,
@@ -91,6 +176,8 @@ class ArtworkService:
             file_size=len(file_data),
             mime_type=content_type,
             status=ArtworkStatus.UPLOADED,
+            image_hash=image_hash,
+            source_url=source_url,
         )
 
         logger.info(
@@ -98,9 +185,16 @@ class ArtworkService:
             artwork_id=str(artwork.id),
             filename=filename,
             file_size=len(file_data),
+            image_hash=image_hash,
         )
 
-        return ArtworkResponse.model_validate(artwork)
+        # ── Phase 1: Auto-Trigger Workflow ───────────────────────────────
+        workflow_run_id, celery_task_id = await self._auto_trigger_workflow(artwork)
+
+        resp = ArtworkResponse.model_validate(artwork)
+        resp.workflow_run_id = workflow_run_id
+        resp.celery_task_id = celery_task_id
+        return resp
 
     async def get_artwork(self, artwork_id: uuid.UUID) -> ArtworkResponse:
         """Retrieve a single artwork by ID.
@@ -197,3 +291,4 @@ class ArtworkService:
             artwork_id=artwork.id,
             reel_script=artwork.reel_script,
         )
+

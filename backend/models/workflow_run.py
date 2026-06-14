@@ -70,12 +70,17 @@ class WorkflowRun(UUIDMixin, TimestampMixin, Base):
 
     @hybrid_property
     def status(self) -> WorkflowStatus:
-        if self._db_status == WorkflowStatus.COMPLETED and self.error_history:
+        db_status = self._db_status
+        if isinstance(db_status, str):
+            db_status = WorkflowStatus(db_status)
+        if db_status == WorkflowStatus.COMPLETED and self.error_history:
             return WorkflowStatus.COMPLETED_WITH_WARNINGS
-        return self._db_status
+        return db_status
 
     @status.setter
     def status(self, value: WorkflowStatus) -> None:
+        if isinstance(value, str):
+            value = WorkflowStatus(value.upper())
         if value == WorkflowStatus.COMPLETED_WITH_WARNINGS:
             self._db_status = WorkflowStatus.COMPLETED
         else:
@@ -106,9 +111,17 @@ class WorkflowRun(UUIDMixin, TimestampMixin, Base):
         "Artwork",
         back_populates="workflow_runs",
     )
+    events: Mapped[list["WorkflowEvent"]] = relationship(
+        "WorkflowEvent",
+        back_populates="workflow_run",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="WorkflowEvent.created_at",
+    )
 
     def __repr__(self) -> str:
         return f"<WorkflowRun id={self.id} status={self.status.value}>"
 
 
 from backend.models.artwork import Artwork  # noqa: E402, F401
+from backend.models.workflow_event import WorkflowEvent  # noqa: E402, F401

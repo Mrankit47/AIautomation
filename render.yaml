@@ -1,0 +1,69 @@
+services:
+  # ── FastAPI Application Web Service ──
+  - type: web
+    name: artwork-app
+    env: docker
+    dockerfilePath: docker/Dockerfile
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: artwork-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: artwork-redis
+          type: redis
+          property: connectionString
+      - key: FEATURE_FLAGS__ENABLE_INSTAGRAM_PUBLISH
+        value: "true"
+      - key: FEATURE_FLAGS__ENABLE_YOUTUBE_PUBLISH
+        value: "true"
+      - key: FEATURE_FLAGS__ENABLE_REEL_GENERATION
+        value: "true"
+
+  # ── Celery Worker Background Service ──
+  - type: worker
+    name: artwork-worker
+    env: docker
+    dockerfilePath: docker/Dockerfile
+    dockerCommand: /app/scripts/start_celery.sh
+    plan: starter
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: artwork-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: artwork-redis
+          type: redis
+          property: connectionString
+      - key: FEATURE_FLAGS__ENABLE_INSTAGRAM_PUBLISH
+        value: "true"
+      - key: FEATURE_FLAGS__ENABLE_YOUTUBE_PUBLISH
+        value: "true"
+      - key: FEATURE_FLAGS__ENABLE_REEL_GENERATION
+        value: "true"
+
+  # ── Managed Redis Instance ──
+  - type: redis
+    name: artwork-redis
+    plan: starter
+    ipAllowList: [] # Access restricted to internal network services only
+
+databases:
+  # ── Managed PostgreSQL Database ──
+  - name: artwork-db
+    plan: starter
+    databaseName: artwork_automation
+    user: artwork_user
