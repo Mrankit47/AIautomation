@@ -45,6 +45,8 @@ def _should_generate_reel(state: ArtworkWorkflowState) -> str:
         return "publish_instagram"
     if settings.feature_flags.enable_youtube_publish:
         return "publish_youtube"
+    if settings.feature_flags.enable_pinterest_publish:
+        return "publish_pinterest"
     if settings.feature_flags.enable_analytics_collection:
         return "collect_analytics"
     return "end"
@@ -60,6 +62,8 @@ def _after_reel(state: ArtworkWorkflowState) -> str:
         return "publish_instagram"
     if settings.feature_flags.enable_youtube_publish:
         return "publish_youtube"
+    if settings.feature_flags.enable_pinterest_publish:
+        return "publish_pinterest"
     if settings.feature_flags.enable_analytics_collection:
         return "collect_analytics"
     return "end"
@@ -73,6 +77,8 @@ def _after_publish_instagram(state: ArtworkWorkflowState) -> str:
     settings = get_settings()
     if settings.feature_flags.enable_youtube_publish:
         return "publish_youtube"
+    if settings.feature_flags.enable_pinterest_publish:
+        return "publish_pinterest"
     if settings.feature_flags.enable_analytics_collection:
         return "collect_analytics"
     return "end"
@@ -80,6 +86,19 @@ def _after_publish_instagram(state: ArtworkWorkflowState) -> str:
 
 def _after_publish_youtube(state: ArtworkWorkflowState) -> str:
     """Router: determine where to go after YouTube publishing."""
+    if state.get("workflow_status") == "failed":
+        return "handle_error"
+    
+    settings = get_settings()
+    if settings.feature_flags.enable_pinterest_publish:
+        return "publish_pinterest"
+    if settings.feature_flags.enable_analytics_collection:
+        return "collect_analytics"
+    return "end"
+
+
+def _after_publish_pinterest(state: ArtworkWorkflowState) -> str:
+    """Router: determine where to go after Pinterest publishing."""
     if state.get("workflow_status") == "failed":
         return "handle_error"
     
@@ -110,6 +129,7 @@ def build_artwork_workflow() -> StateGraph:
     graph.add_node("generate_reel", generate_reel)
     graph.add_node("publish_instagram", publish_instagram)
     graph.add_node("publish_youtube", publish_youtube)
+    graph.add_node("publish_pinterest", publish_pinterest)
     graph.add_node("collect_analytics", collect_analytics)
     graph.add_node("handle_error", handle_error)
 
@@ -146,6 +166,7 @@ def build_artwork_workflow() -> StateGraph:
             "generate_reel": "generate_reel",
             "publish_instagram": "publish_instagram",
             "publish_youtube": "publish_youtube",
+            "publish_pinterest": "publish_pinterest",
             "collect_analytics": "collect_analytics",
             "end": END,
         },
@@ -156,6 +177,7 @@ def build_artwork_workflow() -> StateGraph:
         {
             "publish_instagram": "publish_instagram",
             "publish_youtube": "publish_youtube",
+            "publish_pinterest": "publish_pinterest",
             "collect_analytics": "collect_analytics",
             "end": END,
             "handle_error": "handle_error",
@@ -168,6 +190,7 @@ def build_artwork_workflow() -> StateGraph:
         _after_publish_instagram,
         {
             "publish_youtube": "publish_youtube",
+            "publish_pinterest": "publish_pinterest",
             "collect_analytics": "collect_analytics",
             "end": END,
             "handle_error": "handle_error",
@@ -176,6 +199,16 @@ def build_artwork_workflow() -> StateGraph:
     graph.add_conditional_edges(
         "publish_youtube",
         _after_publish_youtube,
+        {
+            "publish_pinterest": "publish_pinterest",
+            "collect_analytics": "collect_analytics",
+            "end": END,
+            "handle_error": "handle_error",
+        },
+    )
+    graph.add_conditional_edges(
+        "publish_pinterest",
+        _after_publish_pinterest,
         {
             "collect_analytics": "collect_analytics",
             "end": END,

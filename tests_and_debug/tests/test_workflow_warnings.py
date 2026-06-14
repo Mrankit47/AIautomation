@@ -62,6 +62,8 @@ async def test_workflow_warning_propagation() -> None:
              mock_settings.return_value.feature_flags.enable_reel_generation = False
              mock_settings.return_value.feature_flags.enable_instagram_publish = False
              mock_settings.return_value.feature_flags.enable_youtube_publish = False
+             mock_settings.return_value.feature_flags.enable_pinterest_publish = False
+             mock_settings.return_value.feature_flags.enable_tiktok_publish = False
              mock_settings.return_value.feature_flags.enable_analytics_collection = True
 
              with patch("backend.database.session.get_sync_session") as mock_get_sync_session:

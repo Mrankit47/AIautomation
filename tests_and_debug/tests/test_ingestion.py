@@ -85,3 +85,53 @@ async def test_ingest_artwork_success(client: AsyncClient, mock_artwork_response
                 assert data["workflow_run_id"] == str(mock_artwork_response.workflow_run_id)
                 assert data["celery_task_id"] == mock_artwork_response.celery_task_id
                 assert data["duplicate"] is False
+
+
+@pytest.mark.asyncio
+async def test_cloudinary_webhook_invalid_signature(client: AsyncClient) -> None:
+    """Test that Cloudinary webhook with invalid signature is rejected."""
+    with patch("backend.api.v1.ingestion.get_settings") as mock_settings:
+        mock_settings.return_value.cloudinary.api_secret.get_secret_value.return_value = "secret"
+        
+        with patch("cloudinary.utils.verify_notification_signature") as mock_verify:
+            mock_verify.return_value = False
+            
+            response = await client.post(
+                "/api/v1/ingestion/cloudinary",
+                json={"notification_type": "upload", "secure_url": "http://example.com/art.png"},
+                headers={"X-Cld-Signature": "sig", "X-Cld-Timestamp": "12345"},
+            )
+            assert response.status_code == 400
+            assert "Invalid Cloudinary signature" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_cloudinary_webhook_success(client: AsyncClient, mock_artwork_response) -> None:
+    """Test successful ingestion of artwork via Cloudinary webhook."""
+    with patch("backend.api.v1.ingestion.get_settings") as mock_settings:
+        mock_settings.return_value.cloudinary.api_secret.get_secret_value.return_value = "secret"
+        
+        with patch("cloudinary.utils.verify_notification_signature") as mock_verify:
+            mock_verify.return_value = True
+            
+            with patch("httpx.AsyncClient.get") as mock_get:
+                mock_http_resp = MagicMock()
+                mock_http_resp.status_code = 200
+                mock_http_resp.content = b"fake-cloudinary-bytes"
+                mock_http_resp.headers = {"content-type": "image/png"}
+                mock_http_resp.raise_for_status = MagicMock()
+                mock_get.return_value = mock_http_resp
+                
+                with patch("backend.api.v1.ingestion.ArtworkService.upload_artwork", new_callable=AsyncMock) as mock_upload:
+                    mock_upload.return_value = mock_artwork_response
+                    
+                    response = await client.post(
+                        "/api/v1/ingestion/cloudinary",
+                        json={"notification_type": "upload", "secure_url": "http://example.com/art.png", "public_id": "art"},
+                        headers={"X-Cld-Signature": "sig", "X-Cld-Timestamp": "12345"},
+                    )
+                    
+                    assert response.status_code == 202
+                    data = response.json()
+                    assert data["status"] == "accepted"
+                    assert data["artwork_id"] == str(mock_artwork_response.id)

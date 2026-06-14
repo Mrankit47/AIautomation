@@ -144,6 +144,12 @@ class Artwork(UUIDMixin, TimestampMixin, Base):
     youtube_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     youtube_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # ── Pinterest Publishing ─────────────────────────────────────────────
+    pinterest_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    pinterest_pin_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    pinterest_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    pinterest_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # ── Error Tracking ───────────────────────────────────────────────────
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 

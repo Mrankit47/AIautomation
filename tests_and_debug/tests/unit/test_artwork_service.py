@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,3 +87,44 @@ async def test_get_artwork_not_found(mock_db_session: AsyncSession, mock_storage
 
     with pytest.raises(NotFoundException):
         await service.get_artwork(uuid.uuid4())
+
+
+@pytest.mark.asyncio
+async def test_upload_artwork_heic_conversion(mock_db_session: AsyncSession, mock_storage: MagicMock) -> None:
+    """Test that uploading an HEIC file automatically converts it to JPEG."""
+    service = ArtworkService(session=mock_db_session, storage=mock_storage)
+
+    # Mock DB insert / repo.create
+    mock_artwork = Artwork(
+        id=uuid.uuid4(),
+        title="HEIC Art",
+        original_filename="art.jpg",
+        file_path="artworks/mock-id.jpg",
+        storage_url="http://mock-storage/artworks/mock-id.jpg",
+        file_size=512,
+        mime_type="image/jpeg",
+        status=ArtworkStatus.UPLOADED,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    service._repo.create = AsyncMock(return_value=mock_artwork)
+
+    # Mock pillow_heif and PIL Image
+    with patch("pillow_heif.register_heif_opener") as mock_register, \
+         patch("PIL.Image.open") as mock_open:
+        
+        mock_img = MagicMock()
+        mock_open.return_value = mock_img
+        
+        response = await service.upload_artwork(
+            file_data=b"fake-heic-bytes",
+            filename="art.heic",
+            content_type="image/heic",
+            title="HEIC Art",
+        )
+        
+        assert mock_register.called
+        assert mock_open.called
+        mock_img.convert.assert_called_with("RGB")
+        mock_img.convert().save.assert_called_once()
+        assert response.status == ArtworkStatus.UPLOADED

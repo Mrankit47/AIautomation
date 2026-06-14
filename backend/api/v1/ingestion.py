@@ -15,10 +15,11 @@ from __future__ import annotations
 import mimetypes
 
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from backend.api.deps import get_artwork_service
 from backend.auth.webhook_auth import verify_webhook_api_key
+from backend.config.settings import get_settings
 from backend.core.exceptions import ValidationException
 from backend.core.logging import get_logger
 from backend.schemas.ingestion import IngestionRequest, IngestionResponse
@@ -113,6 +114,128 @@ async def ingest_artwork(
 
     logger.info(
         "ingestion_completed",
+        artwork_id=str(artwork_response.id),
+        workflow_run_id=str(artwork_response.workflow_run_id) if artwork_response.workflow_run_id else None,
+        duplicate=is_duplicate,
+    )
+
+    return IngestionResponse(
+        artwork_id=artwork_response.id,
+        workflow_run_id=artwork_response.workflow_run_id,
+        celery_task_id=artwork_response.celery_task_id,
+        status="accepted",
+        message="Duplicate artwork found; returning existing record." if is_duplicate else "Artwork accepted for processing.",
+        duplicate=is_duplicate,
+    )
+
+
+@router.post("/cloudinary", response_model=IngestionResponse, status_code=202)
+async def cloudinary_webhook(
+    request: Request,
+    service: ArtworkService = Depends(get_artwork_service),
+) -> IngestionResponse:
+    """Handle Cloudinary upload webhook notifications.
+
+    Validates signature and pulls the secure_url to ingest.
+    """
+    settings = get_settings()
+    body_bytes = await request.body()
+    body_str = body_bytes.decode("utf-8")
+
+    # Get signature and timestamp headers
+    signature = request.headers.get("X-Cld-Signature")
+    timestamp = request.headers.get("X-Cld-Timestamp")
+
+    api_secret = settings.cloudinary.api_secret.get_secret_value() if settings.cloudinary.api_secret else None
+
+    if signature and timestamp and api_secret:
+        import cloudinary.utils
+        is_valid = cloudinary.utils.verify_notification_signature(
+            body=body_str,
+            signature=signature,
+            timestamp=int(timestamp),
+            secret=api_secret,
+        )
+        if not is_valid:
+            raise ValidationException(detail="Invalid Cloudinary signature", status_code=400)
+
+    try:
+        import json
+        payload = json.loads(body_str)
+    except Exception as e:
+        raise ValidationException(detail=f"Invalid JSON payload: {str(e)}")
+
+    notification_type = payload.get("notification_type")
+    if notification_type and notification_type != "upload":
+        logger.info("cloudinary_webhook_ignored", notification_type=notification_type)
+        # Return a dummy response for ignored notification types to avoid erroring Cloudinary
+        import uuid
+        return IngestionResponse(
+            artwork_id=uuid.UUID(int=0),
+            workflow_run_id=None,
+            celery_task_id=None,
+            status="ignored",
+            message=f"Ignored notification type: {notification_type}",
+            duplicate=False,
+        )
+
+    secure_url = payload.get("secure_url")
+    if not secure_url:
+        raise ValidationException(detail="Missing secure_url in webhook payload")
+
+    # Determine public ID / title
+    public_id = payload.get("public_id", "")
+    title = public_id.split("/")[-1] if "/" in public_id else public_id
+    if not title:
+        title = "Cloudinary Ingested Artwork"
+
+    # Download file data
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(DOWNLOAD_TIMEOUT),
+            follow_redirects=True,
+        ) as client:
+            response = await client.get(secure_url)
+            response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise ValidationException(
+            detail=f"Failed to download image from Cloudinary: HTTP {exc.response.status_code}",
+            context={"url": secure_url},
+        )
+    except httpx.RequestError as exc:
+        raise ValidationException(
+            detail=f"Failed to download image from Cloudinary: {type(exc).__name__}: {exc}",
+            context={"url": secure_url},
+        )
+
+    file_data = response.content
+    if len(file_data) > MAX_DOWNLOAD_SIZE:
+        raise ValidationException(
+            detail=f"Downloaded Cloudinary image exceeds {MAX_DOWNLOAD_SIZE // (1024 * 1024)} MB limit.",
+        )
+
+    content_type = response.headers.get("content-type", "").split(";")[0].strip()
+    if not content_type or not content_type.startswith("image/"):
+        guessed, _ = mimetypes.guess_type(secure_url)
+        content_type = guessed or "image/png"
+
+    filename = secure_url.rsplit("/", 1)[-1].rsplit("?", 1)[0]
+    if not filename or "." not in filename:
+        filename = f"{public_id.replace('/', '_')}.{content_type.split('/')[-1]}"
+
+    # Feed into the pipeline
+    artwork_response = await service.upload_artwork(
+        file_data=file_data,
+        filename=filename,
+        content_type=content_type,
+        title=title,
+        source_url=secure_url,
+    )
+
+    is_duplicate = artwork_response.image_hash is not None and artwork_response.source_url != secure_url
+
+    logger.info(
+        "cloudinary_ingestion_completed",
         artwork_id=str(artwork_response.id),
         workflow_run_id=str(artwork_response.workflow_run_id) if artwork_response.workflow_run_id else None,
         duplicate=is_duplicate,

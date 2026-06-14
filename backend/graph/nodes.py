@@ -767,18 +767,91 @@ async def publish_pinterest(state: ArtworkWorkflowState) -> dict[str, Any]:
     """Node: Publish to Pinterest."""
     artwork_id = state["artwork_id"]
     workflow_id = state["workflow_id"]
-    logger.info("node_execute", node="publish_pinterest", artwork_id=artwork_id)
+    logger.info("pinterest_publish_started", artwork_id=artwork_id, workflow_id=workflow_id)
     _update_run_node(workflow_id, "publish_pinterest")
+    _emit_event(workflow_id, "publish_pinterest", "started")
+    node_start = time.monotonic()
+    _update_run_publishing_status(workflow_id, "pinterest", "pending")
+    _update_artwork_multiple_fields(artwork_id, {"pinterest_status": "pending"})
 
     try:
-        _update_run_publishing_status(workflow_id, "pinterest", "pending")
+        # Load storage_url, title, caption and hashtags from DB
+        from backend.database.session import get_sync_session
+        from backend.models.artwork import Artwork
+        from sqlalchemy import select
+
+        session = get_sync_session()
+        storage_url = None
+        title = None
+        caption = None
+        hashtags = None
+        try:
+            art = session.execute(
+                select(Artwork).where(Artwork.id == uuid.UUID(artwork_id))
+            ).scalar_one_or_none()
+            if art:
+                storage_url = art.storage_url
+                title = art.title or art.original_filename.rsplit(".", 1)[0]
+                caption = art.caption
+                hashtags = art.hashtags
+        finally:
+            session.close()
+
+        if not storage_url:
+            raise ValueError("No uploaded artwork URL (storage_url) found to publish to Pinterest.")
+        if not caption:
+            raise ValueError("No caption found to publish.")
+
+        # Transition to processing status
+        _update_run_publishing_status(workflow_id, "pinterest", "processing")
+        _update_artwork_multiple_fields(artwork_id, {"pinterest_status": "processing"})
+
+        # Instantiate client and publish
+        from backend.integrations.pinterest.client import PinterestClient
+        client = PinterestClient()
+
+        async def _publish_op():
+            return await client.publish_image(
+                image_url=storage_url,
+                caption=caption,
+                hashtags=hashtags,
+                title=title,
+            )
+
+        # Enforce retry system logic (Phase 6)
+        result = await _retry_on_transient(
+            coro_factory=_publish_op,
+            node_name="publish_pinterest",
+            workflow_run_id=workflow_id,
+            max_retries=3,
+            base_delay=5.0,
+        )
+
+        # Success - update fields and set status to published
+        _update_artwork_multiple_fields(
+            artwork_id,
+            {
+                "pinterest_status": "published",
+                "pinterest_pin_id": result.post_id,
+                "pinterest_url": result.url,
+                "pinterest_published_at": result.published_at,
+            }
+        )
+        _update_run_publishing_status(workflow_id, "pinterest", "published")
+        logger.info("pinterest_publish_completed", artwork_id=artwork_id, workflow_id=workflow_id, pin_id=result.post_id)
+
         return {
-            "pinterest_status": "pending",
+            "pinterest_status": "published",
             "current_node": "publish_pinterest",
         }
     except Exception as exc:
+        logger.error("pinterest_publish_failed", artwork_id=artwork_id, workflow_id=workflow_id, error=str(exc))
         err = _make_error("publish_pinterest", exc)
+        elapsed_ms = int((time.monotonic() - node_start) * 1000)
+        _emit_event(workflow_id, "publish_pinterest", "failed", duration_ms=elapsed_ms, error_message=str(exc))
         _update_run_node(workflow_id, "publish_pinterest", status="failed", error_history=[err])
+        _update_run_publishing_status(workflow_id, "pinterest", "failed")
+        _update_artwork_multiple_fields(artwork_id, {"pinterest_status": "failed", "error_message": str(exc)})
         return {
             "pinterest_status": "failed",
             "current_node": "publish_pinterest",

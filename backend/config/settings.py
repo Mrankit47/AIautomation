@@ -9,6 +9,10 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from dotenv import load_dotenv
+
+# Explicitly load .env variables into os.environ
+load_dotenv()
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict

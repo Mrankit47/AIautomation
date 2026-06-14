@@ -28,7 +28,7 @@ from backend.storage.base import StorageBackend
 
 logger = get_logger(__name__)
 
-ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/tiff"}
+ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/tiff", "image/heic", "image/heif"}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
@@ -130,6 +130,40 @@ class ArtworkService:
         Raises:
             ValidationException: If file type or size is invalid.
         """
+        # Convert HEIC/HEIF to JPEG automatically
+        lower_content_type = content_type.lower()
+        is_heic = lower_content_type in {"image/heic", "image/heif"} or filename.lower().endswith((".heic", ".heif"))
+        
+        if is_heic:
+            import io
+            from PIL import Image
+            import pillow_heif
+            
+            try:
+                pillow_heif.register_heif_opener()
+                image = Image.open(io.BytesIO(file_data))
+                
+                # Convert HEIC/HEIF to JPEG
+                out_buffer = io.BytesIO()
+                image.convert("RGB").save(out_buffer, format="JPEG", quality=95)
+                file_data = out_buffer.getvalue()
+                
+                # Change filename and content_type to JPEG
+                base_name = filename.rsplit(".", 1)[0]
+                filename = f"{base_name}.jpg"
+                content_type = "image/jpeg"
+                
+                logger.info(
+                    "heic_converted_to_jpeg",
+                    original_filename=filename,
+                    converted_size=len(file_data),
+                )
+            except Exception as e:
+                logger.error("heic_conversion_failed", error=str(e))
+                raise ValidationException(
+                    detail=f"Failed to process HEIC/HEIF image: {str(e)}"
+                )
+
         if content_type not in ALLOWED_MIME_TYPES:
             raise ValidationException(
                 detail=f"Unsupported file type: {content_type}. Allowed: {ALLOWED_MIME_TYPES}",
