@@ -68,6 +68,9 @@ def init_engine(db_settings: DatabaseSettings) -> None:
         max_overflow=db_settings.max_overflow,
         pool_pre_ping=True,
         echo=False,
+        connect_args={
+            "statement_cache_size": 0,
+        }
     )
     AsyncSessionLocal = async_sessionmaker(
         bind=async_engine,
