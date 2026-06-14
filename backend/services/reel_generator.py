@@ -21,7 +21,7 @@ class ReelGenerator:
 
     def _select_audio_track(self, analysis: dict[str, Any] | None) -> str:
         """Select background audio track dynamically based on artwork analysis."""
-        audio_dir = Path(__file__).parent.parent / "resources" / "audio"
+        audio_dir = (Path(__file__).parent.parent / "resources" / "audio").resolve().absolute()
         default_track = "ambient_dreamy_space.mp3"
         
         if not analysis:
@@ -76,10 +76,10 @@ class ReelGenerator:
             else:
                 track_name = default_track
 
-        selected_path = audio_dir / track_name
+        selected_path = (audio_dir / track_name).resolve().absolute()
         if not selected_path.exists():
             logger.warning("selected_audio_file_not_found_using_fallback", path=str(selected_path), fallback=default_track)
-            selected_path = audio_dir / default_track
+            selected_path = (audio_dir / default_track).resolve().absolute()
             
         logger.info("selected_audio_track", file=selected_path.name)
         return str(selected_path)
@@ -106,7 +106,7 @@ class ReelGenerator:
         logger.info("reel_render_started", image_path=image_path, output_path=output_path)
 
         # 1. Create output directory if it does not exist
-        out_file = Path(output_path)
+        out_file = Path(output_path).resolve().absolute()
         out_file.parent.mkdir(parents=True, exist_ok=True)
 
         # 2. Extract and validate duration
@@ -114,10 +114,11 @@ class ReelGenerator:
         duration = max(10, min(duration, 60))  # Clamp between 10 and 60 seconds
 
         # 3. Load input image
-        if not os.path.exists(image_path):
-            raise FileNotFoundError(f"Source image not found: {image_path}")
+        resolved_image_path = Path(image_path).resolve().absolute()
+        if not resolved_image_path.exists():
+            raise FileNotFoundError(f"Source image not found: {resolved_image_path}")
 
-        img = Image.open(image_path).convert("RGB")
+        img = Image.open(resolved_image_path).convert("RGB")
         orig_w, orig_h = img.size
 
         # Vertical target: 1080x1920
@@ -286,17 +287,20 @@ class ReelGenerator:
                     "-map", "1:a",
                     "-c:v", "copy",
                     "-c:a", "aac",
+                    "-strict", "-2",
                     "-shortest",
                     str(out_file)
                 ]
                 
-                # Run subprocess
-                subprocess.run(
+                # Run subprocess and capture output for detailed error logs
+                res = subprocess.run(
                     cmd,
-                    check=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                    capture_output=True,
+                    text=True,
+                    check=False
                 )
+                if res.returncode != 0:
+                    raise RuntimeError(f"ffmpeg failed with exit code {res.returncode}. Stderr: {res.stderr}")
                 logger.info("audio_track_overlay_successful_via_ffmpeg")
                 audio_attached = True
             else:
