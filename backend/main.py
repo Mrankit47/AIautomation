@@ -47,6 +47,10 @@ def create_app() -> FastAPI:
 
     # ── Routers ──────────────────────────────────────────────────────────
     app.include_router(api_router)
+    
+    # Expose health endpoints at the root level for load balancer / container health checks
+    from backend.api.v1.health import router as health_router
+    app.include_router(health_router)
 
     return app
 
