@@ -70,6 +70,7 @@ def init_engine(db_settings: DatabaseSettings) -> None:
         echo=False,
         connect_args={
             "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
         }
     )
     AsyncSessionLocal = async_sessionmaker(

@@ -105,5 +105,11 @@ We have made the repository 100% deploy-ready for Render.com's **Free Web Servic
    * **GEMINI__API_KEY**, **GROQ_API_KEY**, and social media credentials.
 5. Click **Apply** to deploy. Render will build and deploy the container on the free tier.
 
+---
+
+## 5. Alembic Migration & PgBouncer Fix
+* **Symptom**: During the deploy hook, the combined container started local Redis successfully, but failed during database migrations (`alembic upgrade head`) with the error `DuplicatePreparedStatementError: prepared statement "__asyncpg_stmt_1__" already exists` inside `alembic/env.py`.
+* **Resolution**: Modified the database connection pool creation inside [alembic/env.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/alembic/env.py) to pass `connect_args={"statement_cache_size": 0}` to the migration runner's async engine builder (`async_engine_from_config`). This forces Alembic to disable prepared statement caching as well, allowing database migrations to run successfully against connection pools like Supabase and Neon.
+
 ### Local Compatibility:
 * **Important**: All modifications are 100% backward compatible. Local development via `docker-compose up` remains completely unaffected as it bypasses the internal Redis server and connects to the standalone `artwork-redis` container. All local tests pass successfully (67 PASSED, 1 SKIPPED).
