@@ -110,6 +110,13 @@ We have made the repository 100% deploy-ready for Render.com's **Free Web Servic
 ## 5. Alembic Migration & PgBouncer Fix
 * **Symptom**: During the deploy hook, the combined container started local Redis successfully, but failed during database migrations (`alembic upgrade head`) with the error `DuplicatePreparedStatementError: prepared statement "__asyncpg_stmt_1__" already exists` inside `alembic/env.py`.
 * **Resolution**: Modified the database connection pool creation inside [alembic/env.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/alembic/env.py) to pass `connect_args={"statement_cache_size": 0}` to the migration runner's async engine builder (`async_engine_from_config`). This forces Alembic to disable prepared statement caching as well, allowing database migrations to run successfully against connection pools like Supabase and Neon.
-
-### Local Compatibility:
-* **Important**: All modifications are 100% backward compatible. Local development via `docker-compose up` remains completely unaffected as it bypasses the internal Redis server and connects to the standalone `artwork-redis` container. All local tests pass successfully (67 PASSED, 1 SKIPPED).
+ 
++## 6. Alembic Schema Drift & Column Addition Fix
++* **Symptom**: After fixing the PgBouncer error, the migrations crashed with: `sqlalchemy.exc.ProgrammingError: (sqlalchemy.dialects.postgresql.asyncpg.ProgrammingError) <class 'asyncpg.exceptions.UndefinedColumnError'>: column "reel_script" of relation "artworks" does not exist` during the `61cbc473be4c` migration.
++* **Cause**: The older migration `e04218e7bbac` was created with an empty `upgrade()` function, meaning the `reel_script` column was never added to the database. However, the migration version was still marked as completed in the database. When subsequent migrations attempted to alter this column, it failed because the column did not exist.
++* **Resolution**:
++  1. Updated [e04218e7bbac_add_reel_script.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/alembic/versions/e04218e7bbac_add_reel_script.py) to define the `reel_script` column as `JSONB` on upgrade.
++  2. Dynamically patched [61cbc473be4c_add_instagram_publishing_fields.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/alembic/versions/61cbc473be4c_add_instagram_publishing_fields.py) to inspect the table columns at runtime. If `reel_script` does not exist (resolving schema drift on existing databases where the empty version already ran), it adds it directly as `JSON`. If it exists, it alters it as originally designed.
++
+ ### Local Compatibility:
+ * **Important**: All modifications are 100% backward compatible. Local development via `docker-compose up` remains completely unaffected as it bypasses the internal Redis server and connects to the standalone `artwork-redis` container. All local tests pass successfully (67 PASSED, 1 SKIPPED).
