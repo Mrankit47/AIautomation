@@ -24,10 +24,20 @@ def upgrade() -> None:
     op.add_column('artworks', sa.Column('instagram_post_id', sa.String(length=500), nullable=True))
     op.add_column('artworks', sa.Column('instagram_permalink', sa.String(length=2000), nullable=True))
     op.add_column('artworks', sa.Column('instagram_published_at', sa.DateTime(timezone=True), nullable=True))
-    op.alter_column('artworks', 'reel_script',
-               existing_type=postgresql.JSONB(astext_type=sa.Text()),
-               type_=postgresql.JSON(astext_type=sa.Text()),
-               existing_nullable=True)
+    
+    # Check if reel_script column exists (resolves schema drift if e04218e7bbac ran as empty previously)
+    from sqlalchemy import inspect
+    bind = op.get_context().bind
+    inspector = inspect(bind)
+    columns = [c["name"] for c in inspector.get_columns('artworks')]
+    
+    if 'reel_script' not in columns:
+        op.add_column('artworks', sa.Column('reel_script', postgresql.JSON(astext_type=sa.Text()), nullable=True))
+    else:
+        op.alter_column('artworks', 'reel_script',
+                   existing_type=postgresql.JSONB(astext_type=sa.Text()),
+                   type_=postgresql.JSON(astext_type=sa.Text()),
+                   existing_nullable=True)
     # ### end Alembic commands ###
 
 
