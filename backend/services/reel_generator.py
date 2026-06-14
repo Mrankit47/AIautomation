@@ -264,15 +264,16 @@ class ReelGenerator:
         except Exception as audio_err:
             logger.error("failed_to_attach_audio_continuing_without_it", error=str(audio_err))
 
-        # Write to MP4 using libx264 (enable audio writing)
+        # Write to MP4 using libx264 (enable audio writing, force threads=1 for low-RAM stability)
         clip.write_videofile(
             str(out_file),
             fps=24,
             codec="libx264",
             preset="ultrafast",  # Use ultrafast preset to minimize encoding overhead and memory usage on low-RAM free tiers
+            threads=1,           # Force single-threaded rendering to prevent concurrent frame buffering OOM crashes
             audio=True,
             audio_codec="aac",
-            logger=None,  # Suppress moviepy progress bar to keep logs clean
+            logger=None,         # Suppress moviepy progress bar to keep logs clean
         )
         
         # Clean up resources
