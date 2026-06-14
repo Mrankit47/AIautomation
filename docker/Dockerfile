@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ffmpeg \
     fonts-dejavu-core \
+    redis-server \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /root/.local /root/.local

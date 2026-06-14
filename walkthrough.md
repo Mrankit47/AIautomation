@@ -81,26 +81,29 @@ tests_and_debug/tests/test_retry.py::test_retry_on_transient_exhausts_retries PA
 
 ---
 
-## 4. Render Deployment Guide
+## 4. Render Free-Tier Deployment Guide
 
-We have made the repository 100% deploy-ready for Render.com using Render Blueprints. 
+We have made the repository 100% deploy-ready for Render.com's **Free Web Service** tier using a single container "All-in-One" architecture. This avoids any paid services (like managed background workers or Redis) and doesn't require a credit card.
 
 ### What We Added:
-1. **Dynamic Config Parsing**: The database settings and redis settings in [settings.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/config/settings.py) now dynamically parse unified connection strings (`DATABASE_URL` and `REDIS_URL`) instead of requiring separate host/port parameters.
-2. **Celery Auto-Configuration**: The root settings automatically parse `REDIS_URL` and derive separate broker/backend databases (indices `/1` and `/2` respectively) if Celery Broker URLs are left at their defaults.
-3. **Blueprint File**: Created [render.yaml](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/render.yaml) at the repository root defining:
-   * **artwork-app** (FastAPI Web Service)
-   * **artwork-worker** (Celery Background Worker)
-   * **artwork-redis** (Managed Redis Instance)
-   * **artwork-db** (Managed PostgreSQL Database)
+1. **Docker Container updates**: Added `redis-server` installation to the production Dockerfile runner stage.
+2. **Combined Startup Script**: Created [start_combined.sh](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/scripts/start_combined.sh) which starts:
+   * Local lightweight `redis-server` inside the container.
+   * Celery worker in the background (with concurrency limited to 2 to fit Render's 512MB RAM free tier limit).
+   * Alembic database migrations.
+   * FastAPI application (`uvicorn`) in the foreground.
+3. **Free-Tier Blueprint**: Created [render.yaml](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/render.yaml) at the repository root configuring a single `web` service (`plan: free`) running the combined container.
 
-### How to Deploy on Render:
-1. **Commit & Push** your repository changes to GitHub/GitLab.
-2. Go to your **Render Dashboard** and click **New > Blueprint**.
-3. Select your repository. Render will automatically parse [render.yaml](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/render.yaml) and list the 4 services (FastAPI app, Celery worker, Redis, PostgreSQL).
-4. Fill in any required external environment secrets (like API keys for Instagram, YouTube, Gemini, and Groq).
-5. Click **Apply** to provision and deploy the entire stack automatically.
-6. The web app's database migrations will automatically run (`alembic upgrade head`) before uvicorn starts.
+### How to Deploy on Render for Free (No Credit Card):
+1. **Free Database Setup**:
+   * Create a free PostgreSQL database on [Supabase.com](https://supabase.com) or [Neon.tech](https://neon.tech). These are 100% free and do not ask for a credit card.
+   * Copy the database connection URL (e.g. `postgresql://...` or `postgres://...`).
+2. **Commit & Push** your changes to your Git repository.
+3. Go to **Render.com > Blueprint** and select your repository.
+4. Render will parse [render.yaml](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/render.yaml) and prompt you for parameters:
+   * **DATABASE_URL**: Enter your Supabase or Neon database URL.
+   * **GEMINI__API_KEY**, **GROQ_API_KEY**, and social media credentials.
+5. Click **Apply** to deploy. Render will build and deploy the container on the free tier.
 
 ### Local Compatibility:
-* **Important**: All modifications are 100% backward compatible. Running local development via `docker-compose up` remains unaffected as the codebase falls back to local hostnames and parameters when cloud environment variables are absent. All local tests pass successfully (67 PASSED, 1 SKIPPED).
+* **Important**: All modifications are 100% backward compatible. Local development via `docker-compose up` remains completely unaffected as it bypasses the internal Redis server and connects to the standalone `artwork-redis` container. All local tests pass successfully (67 PASSED, 1 SKIPPED).
