@@ -162,8 +162,16 @@ class ReelGenerator:
             logger.warning("dejavu_font_missing_using_default", font_path=font_path)
             font = ImageFont.load_default()
 
-        # Frame generation function for MoviePy
+        # Frame generation function for MoviePy with memory optimization
+        frame_counter = 0
+        import gc
+        
         def make_frame(t: float) -> np.ndarray:
+            nonlocal frame_counter
+            frame_counter += 1
+            if frame_counter % 24 == 0:
+                gc.collect()
+
             p = t / duration  # Progress percentage (0.0 to 1.0)
 
             # --- Visual Effects: Ken Burns Zoom & Slow Pan ---
@@ -187,9 +195,9 @@ class ReelGenerator:
             right = min(float(orig_w), left + current_crop_w)
             bottom = min(float(orig_h), top + current_crop_h)
 
-            # Crop and resize
+            # Crop and resize using BILINEAR for low-RAM environment compatibility
             frame_img = img.crop((left, top, right, bottom)).resize(
-                (target_w, target_h), Image.Resampling.LANCZOS
+                (target_w, target_h), Image.Resampling.BILINEAR
             )
 
             # --- Text Overlay (Pillow RGBA Draw) ---
@@ -261,6 +269,7 @@ class ReelGenerator:
             str(out_file),
             fps=24,
             codec="libx264",
+            preset="ultrafast",  # Use ultrafast preset to minimize encoding overhead and memory usage on low-RAM free tiers
             audio=True,
             audio_codec="aac",
             logger=None,  # Suppress moviepy progress bar to keep logs clean
@@ -270,6 +279,9 @@ class ReelGenerator:
         clip.close()
         if audio_clip:
             audio_clip.close()
+        
+        # Force garbage collection immediately to release PIL and FFmpeg memory buffers
+        gc.collect()
 
         elapsed = (time.monotonic() - start_time) * 1000
         logger.info("reel_render_completed", output_path=output_path, execution_time_ms=elapsed)
