@@ -154,10 +154,10 @@ class ReelGenerator:
         
         orig_w, orig_h = img.size
 
-        # Target vertical video: 1080x1920
+        # Target vertical video: 720x1280 (Optimised for low-RAM Render Free tier)
         # Scale down original image if it is too large, saving RAM and CPU.
-        # Target crop height of 2200px provides ample room for 1.12x Ken Burns zoom and slow pan.
-        target_crop_h = 2200
+        # Target crop height of 1500px provides ample room for 1.12x Ken Burns zoom and slow pan.
+        target_crop_h = 1500
         orig_crop_h = min(orig_h, int(orig_w * 16 / 9))
         if orig_crop_h > target_crop_h:
             scale_factor = target_crop_h / orig_crop_h
@@ -169,9 +169,9 @@ class ReelGenerator:
             img = img_resized
             orig_w, orig_h = img.size
 
-        # Vertical target: 1080x1920
-        target_w = 1080
-        target_h = 1920
+        # Vertical target: 720x1280
+        target_w = 720
+        target_h = 1280
 
         # Calculate crop boundaries for 9:16 aspect ratio
         crop_h = min(orig_h, int(orig_w * 16 / 9))
@@ -203,10 +203,11 @@ class ReelGenerator:
                 lines.append(" ".join(current_line))
             return lines
 
-        # Font setup
+        # Font setup (dynamic sizing based on target resolution width)
+        font_size = int(target_w * 0.037)  # E.g. 26 for 720w, 40 for 1080w
         font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
         try:
-            font = ImageFont.truetype(font_path, 40)
+            font = ImageFont.truetype(font_path, font_size)
         except Exception:
             logger.warning("dejavu_font_missing_using_default", font_path=font_path)
             font = ImageFont.load_default()
@@ -259,21 +260,21 @@ class ReelGenerator:
 
             if overlay_text:
                 draw = ImageDraw.Draw(frame_img, "RGBA")
-                card_x0 = 90
-                card_x1 = 990
-                padding = 40
+                card_x0 = int(target_w * 0.083)  # Left margin
+                card_x1 = int(target_w * 0.917)  # Right margin
+                padding = int(target_w * 0.037)  # Padding inside card
                 max_text_width = (card_x1 - card_x0) - 2 * padding
 
                 lines = _wrap_text(overlay_text, draw, font, max_text_width)
 
                 # Calculate text dimensions
                 try:
-                    line_height = font.getbbox("A")[3] - font.getbbox("A")[1] + 15
+                    line_height = font.getbbox("A")[3] - font.getbbox("A")[1] + int(target_w * 0.014)
                 except Exception:
-                    line_height = 50
+                    line_height = int(target_w * 0.046)
 
                 total_text_height = len(lines) * line_height
-                card_y1 = 1700
+                card_y1 = int(target_h * 0.885)  # Bottom margin
                 card_y0 = card_y1 - total_text_height - 2 * padding
 
                 # Draw dark card container
@@ -289,7 +290,7 @@ class ReelGenerator:
                     try:
                         w = draw.textlength(line, font=font)
                     except Exception:
-                        w = len(line) * 20
+                        w = len(line) * font_size * 0.5
                     x = card_x0 + padding + (max_text_width - w) / 2
                     draw.text((x, y), line, fill=(255, 255, 255, 255), font=font)
                     y += line_height

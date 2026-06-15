@@ -18,11 +18,11 @@ alembic upgrade head
 
 # ── 3. Start Celery worker in the background ──
 echo "Starting Celery worker in background..."
-# Using concurrency=1 to fit safely within Render's Free Tier memory limits (512MB RAM)
+# Using solo pool to minimize process overhead and fit safely within Render's Free Tier memory limits (512MB RAM)
 celery -A backend.tasks.celery_app:celery_app worker \
   --loglevel=INFO \
   --queues=artwork,workflow \
-  --concurrency=1 &
+  --pool=solo &
 
 # ── 4. Start FastAPI server in the foreground ──
 echo "Starting FastAPI app in foreground..."
