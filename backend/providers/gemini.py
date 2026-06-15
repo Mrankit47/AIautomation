@@ -36,7 +36,8 @@ class GeminiProvider(AIProvider):
         settings = get_settings()
         self._model_name = settings.gemini.model
         self._max_retries = settings.gemini.max_retries
-        self._timeout = settings.gemini.timeout
+        # Convert seconds to milliseconds (required by google-genai SDK HttpOptions)
+        self._timeout = settings.gemini.timeout * 1000
 
         api_key = settings.gemini.api_key.get_secret_value()
         if not api_key or api_key == "mock-api-key":
@@ -113,12 +114,36 @@ class GeminiProvider(AIProvider):
         """Analyze an artwork image via Gemini vision capabilities."""
         start_time = time.perf_counter()
         try:
-            logger.info(
-                "gemini_analyze_image",
-                model=self._model_name,
-                image_size=len(image_data),
-                mime_type=mime_type,
-            )
+            # Compress image to optimize upload speed and prevent network timeouts
+            try:
+                from io import BytesIO
+                from PIL import Image
+                
+                with Image.open(BytesIO(image_data)) as img:
+                    max_size = 1024
+                    if max(img.size) > max_size:
+                        img.thumbnail((max_size, max_size), Image.Resampling.BILINEAR)
+                    
+                    out_buffer = BytesIO()
+                    if img.mode in ("RGBA", "P"):
+                        img_to_save = img.convert("RGBA")
+                        img_to_save.save(out_buffer, format="PNG", optimize=True)
+                        mime_type = "image/png"
+                    else:
+                        img_to_save = img.convert("RGB")
+                        img_to_save.save(out_buffer, format="JPEG", quality=85, optimize=True)
+                        mime_type = "image/jpeg"
+                    
+                    compressed_data = out_buffer.getvalue()
+                    logger.info(
+                        "gemini_image_compressed",
+                        original_size=len(image_data),
+                        compressed_size=len(compressed_data),
+                        mime_type=mime_type
+                    )
+                    image_data = compressed_data
+            except Exception as compress_err:
+                logger.warning("gemini_image_compression_failed_using_original", error=str(compress_err))
 
             image_part = types.Part.from_bytes(data=image_data, mime_type=mime_type)
 

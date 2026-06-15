@@ -19,6 +19,29 @@ logger = get_logger(__name__)
 class ReelGenerator:
     """Service to generate professional short-form vertical video reels from artwork."""
 
+    def validate_ffmpeg_env(self) -> None:
+        """Verify that ffmpeg and ffprobe are installed and executable."""
+        import shutil
+        import subprocess
+        
+        ffmpeg_path = shutil.which("ffmpeg")
+        if not ffmpeg_path:
+            raise RuntimeError("ffmpeg binary not found in system PATH.")
+            
+        ffprobe_path = shutil.which("ffprobe")
+        if not ffprobe_path:
+            raise RuntimeError("ffprobe binary not found in system PATH.")
+            
+        try:
+            subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        except Exception as e:
+            raise RuntimeError(f"ffmpeg check failed: {e}")
+            
+        try:
+            subprocess.run(["ffprobe", "-version"], capture_output=True, check=True)
+        except Exception as e:
+            raise RuntimeError(f"ffprobe check failed: {e}")
+
     def _select_audio_track(self, analysis: dict[str, Any] | None) -> str:
         """Select background audio track dynamically based on artwork analysis."""
         audio_dir = (Path(__file__).parent.parent / "resources" / "audio").resolve().absolute()
@@ -102,8 +125,16 @@ class ReelGenerator:
         Returns:
             The output path of the generated video.
         """
+        # Validate that the environment is ready for rendering
+        self.validate_ffmpeg_env()
+
         start_time = time.monotonic()
         logger.info("reel_render_started", image_path=image_path, output_path=output_path)
+
+        # Initialize resource tracking variables
+        img = None
+        base_clip = None
+        clip = None
 
         # 1. Create output directory if it does not exist
         out_file = Path(output_path).resolve().absolute()
@@ -113,13 +144,30 @@ class ReelGenerator:
         duration = int(reel_script.get("duration_seconds", 15))
         duration = max(10, min(duration, 60))  # Clamp between 10 and 60 seconds
 
-        # 3. Load input image
+        # 3. Load and potentially downscale source image to prevent OOM
         resolved_image_path = Path(image_path).resolve().absolute()
         if not resolved_image_path.exists():
             raise FileNotFoundError(f"Source image not found: {resolved_image_path}")
 
-        img = Image.open(resolved_image_path).convert("RGB")
+        with Image.open(resolved_image_path) as raw_img:
+            img = raw_img.convert("RGB")
+        
         orig_w, orig_h = img.size
+
+        # Target vertical video: 1080x1920
+        # Scale down original image if it is too large, saving RAM and CPU.
+        # Target crop height of 2200px provides ample room for 1.12x Ken Burns zoom and slow pan.
+        target_crop_h = 2200
+        orig_crop_h = min(orig_h, int(orig_w * 16 / 9))
+        if orig_crop_h > target_crop_h:
+            scale_factor = target_crop_h / orig_crop_h
+            new_w = int(orig_w * scale_factor)
+            new_h = int(orig_h * scale_factor)
+            logger.info("downscaling_source_image_for_rendering", original_size=(orig_w, orig_h), new_size=(new_w, new_h))
+            img_resized = img.resize((new_w, new_h), Image.Resampling.BILINEAR)
+            img.close()
+            img = img_resized
+            orig_w, orig_h = img.size
 
         # Vertical target: 1080x1920
         target_w = 1080
@@ -250,79 +298,103 @@ class ReelGenerator:
 
         # 4. Compile video clip and render using MoviePy
         # Also apply fadein and fadeout (smooth transition)
-        clip = VideoClip(make_frame, duration=duration)
-        clip = clip.with_effects([vfx.FadeIn(1.0), vfx.FadeOut(1.0)])
+        temp_silent_path = out_file.with_name(f"temp_silent_{out_file.name}").resolve().absolute()
 
-        # Create temporary file path for silent video
-        temp_silent_path = out_file.with_name(f"temp_silent_{out_file.name}")
-
-        # Write to temporary silent MP4 using libx264 (force threads=1 and audio=False for low-RAM stability)
-        clip.write_videofile(
-            str(temp_silent_path),
-            fps=24,
-            codec="libx264",
-            preset="ultrafast",  # Minimize encoding overhead and CPU/memory usage
-            threads=1,           # Force single-threaded rendering to prevent concurrent frame buffering OOM
-            audio=False,         # Write silent video first to save memory (no audio decoding subprocess)
-            logger=None,         # Suppress moviepy progress bar
-        )
-        clip.close()
-        gc.collect()
-
-        # 5. Merge background music using direct, lightweight FFmpeg subprocess (stream copy)
         audio_attached = False
         try:
-            audio_path = self._select_audio_track(analysis)
-            if audio_path and os.path.exists(audio_path):
-                logger.info("merging_audio_via_ffmpeg", video_path=str(temp_silent_path), audio_path=audio_path)
-                import subprocess
-                
-                # Combine using copy codec for video (very fast and memory efficient) and recoding audio to AAC
-                # Trim audio to video duration using -shortest
-                cmd = [
-                    "ffmpeg", "-y",
-                    "-i", str(temp_silent_path),
-                    "-i", audio_path,
-                    "-map", "0:v",
-                    "-map", "1:a",
-                    "-c:v", "copy",
-                    "-c:a", "aac",
-                    "-strict", "-2",
-                    "-shortest",
-                    str(out_file)
-                ]
-                
-                # Run subprocess and capture output for detailed error logs
-                res = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    check=False
-                )
-                if res.returncode != 0:
-                    raise RuntimeError(f"ffmpeg failed with exit code {res.returncode}. Stderr: {res.stderr}")
-                logger.info("audio_track_overlay_successful_via_ffmpeg")
-                audio_attached = True
-            else:
-                logger.warning("audio_track_not_found_skipping_merge", path=audio_path)
-        except Exception as ffmpeg_err:
-            logger.error("ffmpeg_audio_merge_failed_falling_back_to_silent", error=str(ffmpeg_err))
+            base_clip = VideoClip(make_frame, duration=duration)
+            clip = base_clip.with_effects([vfx.FadeIn(1.0), vfx.FadeOut(1.0)])
 
-        # Fallback: if merging failed or was skipped, use the silent video directly
-        if not audio_attached:
-            import shutil
-            shutil.copy(temp_silent_path, out_file)
-            logger.info("fallback_saved_silent_reel")
+            # Write to temporary silent MP4 using libx264 (force threads=1 and audio=False for low-RAM stability)
+            clip.write_videofile(
+                str(temp_silent_path),
+                fps=24,
+                codec="libx264",
+                preset="ultrafast",  # Minimize encoding overhead and CPU/memory usage
+                threads=1,           # Force single-threaded rendering to prevent concurrent frame buffering OOM
+                audio=False,         # Write silent video first to save memory (no audio decoding subprocess)
+                logger=None,         # Suppress moviepy progress bar
+            )
+            # Explicitly close clips and images before merging audio to free maximum RAM
+            clip.close()
+            clip = None
+            base_clip.close()
+            base_clip = None
+            img.close()
+            img = None
+            gc.collect()
 
-        # 6. Cleanup temporary silent file
-        try:
-            if temp_silent_path.exists():
-                temp_silent_path.unlink()
-        except Exception as cleanup_err:
-            logger.warning("failed_to_cleanup_temp_silent_file", error=str(cleanup_err))
+            # 5. Merge background music using direct, lightweight FFmpeg subprocess (stream copy)
+            try:
+                audio_path = self._select_audio_track(analysis)
+                if audio_path and os.path.exists(audio_path):
+                    logger.info("merging_audio_via_ffmpeg", video_path=str(temp_silent_path), audio_path=audio_path)
+                    import subprocess
+                    
+                    # Combine using copy codec for video (very fast and memory efficient) and recoding audio to AAC
+                    # Trim audio to video duration using -shortest
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-i", str(temp_silent_path),
+                        "-i", audio_path,
+                        "-map", "0:v",
+                        "-map", "1:a",
+                        "-c:v", "copy",
+                        "-c:a", "aac",
+                        "-strict", "-2",
+                        "-shortest",
+                        str(out_file)
+                    ]
+                    
+                    # Run subprocess and capture output for detailed error logs
+                    res = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        check=False
+                    )
+                    if res.returncode != 0:
+                        raise RuntimeError(f"ffmpeg failed with exit code {res.returncode}. Stderr: {res.stderr}")
+                    logger.info("audio_track_overlay_successful_via_ffmpeg")
+                    audio_attached = True
+                else:
+                    logger.warning("audio_track_not_found_skipping_merge", path=audio_path)
+            except Exception as ffmpeg_err:
+                logger.error("ffmpeg_audio_merge_failed_falling_back_to_silent", error=str(ffmpeg_err))
 
-        # Force garbage collection immediately to release PIL memory
-        gc.collect()
+            # Fallback: if merging failed or was skipped, use the silent video directly
+            if not audio_attached:
+                import shutil
+                shutil.copy(temp_silent_path, out_file)
+                logger.info("fallback_saved_silent_reel")
+
+        finally:
+            # Resource cleanup inside finally block to prevent memory/resource leaks
+            if clip:
+                try:
+                    clip.close()
+                except Exception:
+                    pass
+            if base_clip:
+                try:
+                    base_clip.close()
+                except Exception:
+                    pass
+            if img:
+                try:
+                    img.close()
+                except Exception:
+                    pass
+
+            # 6. Cleanup temporary silent file
+            try:
+                if temp_silent_path.exists():
+                    temp_silent_path.unlink()
+            except Exception as cleanup_err:
+                logger.warning("failed_to_cleanup_temp_silent_file", error=str(cleanup_err))
+
+            # Force garbage collection immediately to release memory
+            gc.collect()
 
         elapsed = (time.monotonic() - start_time) * 1000
         logger.info("reel_render_completed", output_path=output_path, execution_time_ms=elapsed)

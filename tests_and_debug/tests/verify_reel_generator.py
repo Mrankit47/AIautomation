@@ -11,7 +11,10 @@ def main() -> None:
     print("Starting ReelGenerator verification...")
 
     # 1. Establish paths
-    temp_dir = Path("/app/outputs/temp")
+    if os.name != 'nt' and Path("/app").exists():
+        temp_dir = Path("/app/outputs/temp")
+    else:
+        temp_dir = Path("outputs/temp")
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     mock_image_path = temp_dir / "mock_artwork.png"

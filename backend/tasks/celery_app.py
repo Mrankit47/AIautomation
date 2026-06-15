@@ -32,10 +32,12 @@ def create_celery_app() -> Celery:
         task_serializer=settings.celery.task_serializer,
         result_serializer=settings.celery.result_serializer,
         accept_content=settings.celery.accept_content,
-        # Reliability
+        # Reliability & Process Recycling
         task_track_started=settings.celery.task_track_started,
         task_acks_late=settings.celery.task_acks_late,
         worker_prefetch_multiplier=settings.celery.worker_prefetch_multiplier,
+        worker_max_tasks_per_child=1,
+        worker_max_memory_per_child=250000, # 250MB limit to release memory leaks
         # Timeouts
         task_soft_time_limit=600,   # 10 minutes soft limit
         task_time_limit=900,        # 15 minutes hard limit
