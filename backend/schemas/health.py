@@ -27,3 +27,19 @@ class HealthReadyResponse(BaseModel):
 
     status: str  # "ready" | "degraded" | "unhealthy"
     services: list[ServiceStatus]
+
+
+class IntegrationStatus(BaseModel):
+    """Health status of an individual integration."""
+
+    name: str
+    status: str  # "healthy" | "unhealthy" | "disabled"
+    detail: str | None = None
+
+
+class IntegrationsHealthResponse(BaseModel):
+    """Overall integrations health check response."""
+
+    status: str  # "healthy" | "degraded" | "unhealthy"
+    integrations: list[IntegrationStatus]
+

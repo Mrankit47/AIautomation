@@ -268,9 +268,34 @@ Add deeper health checks for system monitoring and external integrations.
   - Average workflow duration
   - Last workflow completion time
 - Add `GET /health/integrations` — returns:
-  - Instagram API reachability
-  - YouTube API reachability
   - Gemini API reachability
+  - Groq API reachability
+  - Instagram Account 1 (Gallery) reachability & status details
+  - Instagram Account 2 (Photography) reachability & status details
+  - YouTube API reachability & token check
+  - Pinterest API reachability
+  - TikTok API reachability
+
+#### [MODIFY] [health.py (schemas)](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/backend/schemas/health.py)
+
+- Define `IntegrationStatus` and `IntegrationsHealthResponse` models to detail integration health.
+
+---
+
+### PHASE 9.5 — Instagram Token Exchange & Refresh Tool
+
+A robust utility script that enables developers to exchange a short-lived Instagram token for a 60-day long-lived access token, refresh an existing long-lived token, verify its scopes/health against the Meta Graph API, and automatically write it back to update the `.env` configuration file.
+
+---
+
+#### [NEW] [refresh_instagram_token.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/scripts/refresh_instagram_token.py)
+
+- A standalone Python script that:
+  - Loads client configurations (`app_id`, `app_secret`) from environment variables/settings.
+  - Prompts for or accepts a new user access token (short-lived).
+  - Calls Meta Graph API `oauth/access_token` to exchange/refresh it.
+  - Validates the new token against the Instagram Graph API (checks account profile & permissions).
+  - In-place updates the corresponding variable (`INSTAGRAM__ACCESS_TOKEN` or `INSTAGRAM_ACC2__ACCESS_TOKEN`) in the `.env` file at the workspace root.
 
 ---
 
@@ -359,3 +384,5 @@ docker exec artwork-app pytest tests_and_debug/tests/test_state_machine.py -v
 5. **Phase 7**: Call ingestion without API key → verify 401 response
 6. **Phase 8**: Manually try invalid status transition in DB → verify WorkflowException
 7. **Phase 9**: `GET /health/workflow` → verify stats are accurate
+8. **Phase 9 Integration Health**: `GET /health/integrations` → verify health status and details for Gemini, Groq, Instagram (Acc 1 and Acc 2), and YouTube.
+9. **Phase 9.5 Token Refresh**: Run `python scripts/refresh_instagram_token.py` → verify it updates `.env` file correctly with a valid long-lived token.

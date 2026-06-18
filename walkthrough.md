@@ -120,3 +120,23 @@ We have made the repository 100% deploy-ready for Render.com's **Free Web Servic
 +
  ### Local Compatibility:
  * **Important**: All modifications are 100% backward compatible. Local development via `docker-compose up` remains completely unaffected as it bypasses the internal Redis server and connects to the standalone `artwork-redis` container. All local tests pass successfully (67 PASSED, 1 SKIPPED).
+
+---
+
+## 6. Token Expiration Diagnosis & Refresh Enhancements
+
+To address the expired Instagram access token issue identified in the Celery logs, we implemented system-wide verification and refresh utilities.
+
+### 1. Integrations Health Endpoint
+* **Endpoint**: `GET /api/v1/health/integrations`
+* **Features**: Queries the health of all configured integrations and reports granular details (e.g. expired tokens, invalid API keys) to prevent silent publishing failures.
+* **Integrations Checked**: Gemini, Groq, Instagram (Gallery Account 1 & Photography Account 2), YouTube, Pinterest, and TikTok.
+
+### 2. Instagram Token Exchange & Refresh Tool
+* **Script**: [refresh_instagram_token.py](file:///c:/Users/Ankit/OneDrive/Desktop/All%20Projects/AIautomation/scripts/refresh_instagram_token.py)
+* **Features**:
+  * Standalone script with zero dependencies (uses Python's standard library).
+  * Prompts for or accepts a new user short-lived token and exchanges it for a 60-day long-lived token.
+  * Validates the new token against the Meta API to ensure scope/permissions validity.
+  * Safely backs up the current `.env` file as `.env.bak` and updates the target token key in-place.
+
