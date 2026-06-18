@@ -235,6 +235,7 @@ def execute_workflow(
                 "image_path": artwork.file_path,
                 "storage_url": artwork.storage_url or "",
                 "original_filename": artwork.original_filename,
+                "category": artwork.category or "gallery",
                 "analysis": None,
                 "metadata": None,
                 "seo": None,

@@ -38,6 +38,7 @@ router = APIRouter(prefix="/artworks", tags=["artworks"])
 async def upload_artwork(
     file: UploadFile = File(...),
     title: str | None = Form(None),
+    category: str = Form("gallery"),
     service: ArtworkService = Depends(get_artwork_service),
     current_user: User = Depends(get_current_active_user),
 ) -> ArtworkResponse:
@@ -48,6 +49,7 @@ async def upload_artwork(
         filename=file.filename or "untitled.png",
         content_type=file.content_type or "application/octet-stream",
         title=title,
+        category=category,
     )
 
 
@@ -162,31 +164,56 @@ async def get_artwork_reel(
 async def publish_to_instagram(
     artwork_id: uuid.UUID,
     service: ArtworkService = Depends(get_artwork_service),
-    publisher = Depends(get_instagram_publisher),
     current_user: User = Depends(get_current_active_user),
 ) -> InstagramPublishResponse:
-    """Trigger manual publishing of the artwork's reel to Instagram."""
+    """Trigger manual publishing of the artwork to Instagram."""
     from backend.core.exceptions import NotFoundException, ValidationException
+    from backend.services.instagram_publisher import InstagramPublisher
+    from backend.config.settings import get_settings
 
     artwork = await service._repo.get_by_id(artwork_id)
     if not artwork:
         raise NotFoundException(detail=f"Artwork {artwork_id} not found.")
 
-    if not artwork.reel_path:
-        raise ValidationException(detail="Reel has not been generated for this artwork.")
+    category = artwork.category or "gallery"
 
-    if not artwork.caption:
-        raise ValidationException(detail="Caption has not been generated for this artwork.")
+    if category == "photography":
+        if not artwork.file_path:
+            raise ValidationException(detail="Artwork image file path not found.")
+        if not artwork.caption:
+            raise ValidationException(detail="Caption has not been generated for this artwork.")
+            
+        settings = get_settings()
+        access_token = settings.instagram_acc2.access_token.get_secret_value() if settings.instagram_acc2.access_token else ""
+        account_id = settings.instagram_acc2.account_id
+        
+        if not access_token or not account_id:
+            raise ValidationException(detail="Instagram Account 2 credentials are not configured.")
+            
+        publisher = InstagramPublisher(access_token=access_token, account_id=account_id)
+    else:
+        if not artwork.reel_path:
+            raise ValidationException(detail="Reel has not been generated for this artwork.")
+        if not artwork.caption:
+            raise ValidationException(detail="Caption has not been generated for this artwork.")
+            
+        publisher = InstagramPublisher()
 
     # Update status to processing
     await service._repo.update(artwork_id, instagram_status="processing")
 
     try:
         # Publish
-        result = await publisher.publish_reel(
-            reel_path=artwork.reel_path,
-            caption=artwork.caption,
-        )
+        if category == "photography":
+            result = await publisher.publish_photo(
+                image_path=artwork.file_path,
+                caption=artwork.caption,
+            )
+        else:
+            result = await publisher.publish_reel(
+                reel_path=artwork.reel_path,
+                caption=artwork.caption,
+            )
         # Save results
         updated = await service._repo.update(
             artwork_id,

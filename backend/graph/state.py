@@ -43,6 +43,7 @@ class ArtworkWorkflowState(TypedDict):
     image_path: str
     storage_url: str
     original_filename: str
+    category: str
 
     # ── Analysis ─────────────────────────────────────────────────────────
     analysis: dict[str, Any] | None

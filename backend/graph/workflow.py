@@ -36,6 +36,9 @@ def _should_continue(state: ArtworkWorkflowState) -> str:
 
 def _should_generate_reel(state: ArtworkWorkflowState) -> str:
     """Router: check if reel generation is enabled."""
+    if state.get("category") == "photography":
+        return "publish_instagram"
+
     settings = get_settings()
     if settings.feature_flags.enable_reel_generation:
         return "generate_reel"
@@ -74,6 +77,12 @@ def _after_publish_instagram(state: ArtworkWorkflowState) -> str:
     if state.get("workflow_status") == "failed":
         return "handle_error"
     
+    if state.get("category") == "photography":
+        settings = get_settings()
+        if settings.feature_flags.enable_analytics_collection:
+            return "collect_analytics"
+        return "end"
+
     settings = get_settings()
     if settings.feature_flags.enable_youtube_publish:
         return "publish_youtube"

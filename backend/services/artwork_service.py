@@ -108,6 +108,7 @@ class ArtworkService:
         content_type: str,
         title: str | None = None,
         source_url: str | None = None,
+        category: str = "gallery",
     ) -> ArtworkResponse:
         """Upload and persist a new artwork with auto-trigger.
 
@@ -212,6 +213,7 @@ class ArtworkService:
             status=ArtworkStatus.UPLOADED,
             image_hash=image_hash,
             source_url=source_url,
+            category=category,
         )
 
         logger.info(

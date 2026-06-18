@@ -18,6 +18,7 @@ class IngestionRequest(BaseModel):
     title: str
     image_url: HttpUrl
     source: str = "webhook"
+    category: str = "gallery"
 
 
 class IngestionResponse(BaseModel):

@@ -279,6 +279,7 @@ class Settings(BaseSettings):
     gemini: GeminiSettings = Field(default_factory=GeminiSettings)
     cloudinary: CloudinarySettings = Field(default_factory=CloudinarySettings)
     instagram: InstagramSettings = Field(default_factory=InstagramSettings)
+    instagram_acc2: InstagramSettings = Field(default_factory=InstagramSettings)
     youtube: YouTubeSettings = Field(default_factory=YouTubeSettings)
     pinterest: PinterestSettings = Field(default_factory=PinterestSettings)
     tiktok: TikTokSettings = Field(default_factory=TikTokSettings)

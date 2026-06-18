@@ -22,15 +22,17 @@ logger = get_logger(__name__)
 class InstagramPublisher:
     """Instagram Reels Auto Publishing service via Meta Graph API."""
 
-    def __init__(self) -> None:
+    def __init__(self, access_token: str | None = None, account_id: str | None = None) -> None:
         settings = get_settings()
         # Fallback support for both flat environment variables and nested settings
         self._access_token = (
-            os.getenv("INSTAGRAM_ACCESS_TOKEN")
+            access_token
+            or os.getenv("INSTAGRAM_ACCESS_TOKEN")
             or (settings.instagram.access_token.get_secret_value() if settings.instagram.access_token else "")
         )
         self._account_id = (
-            os.getenv("INSTAGRAM_ACCOUNT_ID")
+            account_id
+            or os.getenv("INSTAGRAM_ACCOUNT_ID")
             or settings.instagram.account_id
             or settings.instagram.business_account_id
         )
@@ -181,15 +183,131 @@ class InstagramPublisher:
                 "instagram_published_at": datetime.now(timezone.utc),
             }
 
+    async def publish_photo(
+        self,
+        image_path: str,
+        caption: str,
+    ) -> dict[str, Any]:
+        """Publish a local or remote photo post to Instagram Feed.
+
+        Args:
+            image_path: Local path or public URL of the JPEG/PNG image.
+            caption: Post caption text.
+
+        Returns:
+            Dict containing instagram_post_id, instagram_permalink, and instagram_published_at.
+        """
+        # Validate settings
+        if not self._access_token:
+            raise InstagramAuthError("Instagram access token is not configured.")
+        if not self._account_id:
+            raise InstagramAuthError("Instagram business account ID is not configured.")
+
+        # Resolve image_path to a public URL. Meta API requires a public HTTP(S) URL.
+        if not (image_path.startswith("http://") or image_path.startswith("https://")):
+            if not os.path.exists(image_path):
+                raise FileNotFoundError(f"Image file not found at: {image_path}")
+            # Upload local file to a public temporary host
+            image_url = await self._upload_to_temp_host(image_path)
+        else:
+            image_url = image_path
+
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=30.0) as client:
+            # 1. Create Media Container
+            logger.info(
+                "instagram_publish_photo_container_creation_started",
+                account_id=self._account_id,
+                image_url=image_url,
+            )
+            container_url = f"/{self._account_id}/media"
+            container_data = {
+                "media_type": "IMAGE",
+                "image_url": image_url,
+                "caption": caption,
+                "access_token": self._access_token,
+            }
+            try:
+                resp = await client.post(container_url, data=container_data)
+                resp.raise_for_status()
+                res_data = resp.json()
+            except httpx.HTTPStatusError as e:
+                err_detail = e.response.text
+                logger.error("instagram_publish_photo_container_creation_failed", error=err_detail)
+                raise InstagramAPIError(f"Failed to create media container: {err_detail}") from e
+            except Exception as e:
+                logger.error("instagram_publish_photo_container_creation_failed", error=str(e))
+                raise InstagramAPIError(f"Failed to create media container: {str(e)}") from e
+
+            container_id = res_data.get("id")
+            if not container_id:
+                raise InstagramAPIError("No container ID returned from media creation.")
+
+            # For photo posts, Meta generally doesn't require long processing.
+            # But let's check status just in case, or do a short wait to ensure readiness.
+            await asyncio.sleep(5)
+
+            # 2. Publish Media
+            logger.info("instagram_publish_photo_media_publish_started", container_id=container_id)
+            publish_url = f"/{self._account_id}/media_publish"
+            publish_data = {
+                "creation_id": container_id,
+                "access_token": self._access_token,
+            }
+            try:
+                pub_resp = await client.post(publish_url, data=publish_data)
+                pub_resp.raise_for_status()
+                pub_res_data = pub_resp.json()
+            except Exception as e:
+                logger.error("instagram_publish_photo_media_publish_failed", error=str(e))
+                raise InstagramAPIError(f"Failed to publish media: {str(e)}") from e
+
+            post_id = pub_res_data.get("id")
+            if not post_id:
+                raise InstagramAPIError("No post ID returned from media publish.")
+
+            # 3. Fetch Permalink
+            permalink = None
+            try:
+                get_post_url = f"/{post_id}"
+                post_params = {
+                    "fields": "permalink",
+                    "access_token": self._access_token,
+                }
+                post_resp = await client.get(get_post_url, params=post_params)
+                post_resp.raise_for_status()
+                post_data = post_resp.json()
+                permalink = post_data.get("permalink")
+            except Exception as e:
+                logger.warning(
+                    "instagram_fetch_permalink_failed",
+                    post_id=post_id,
+                    error=str(e),
+                )
+
+            logger.info(
+                "instagram_publish_photo_success",
+                post_id=post_id,
+                permalink=permalink,
+            )
+            return {
+                "instagram_post_id": post_id,
+                "instagram_permalink": permalink,
+                "instagram_published_at": datetime.now(timezone.utc),
+            }
+
     async def _upload_to_temp_host(self, file_path: str) -> str:
         """Upload local file to a temporary public hosting service to get a public URL for Meta API."""
-        logger.info("uploading_video_to_temp_host_started", file_path=file_path)
+        import mimetypes
+        mime_type, _ = mimetypes.guess_type(file_path)
+        mime_type = mime_type or "application/octet-stream"
+        
+        logger.info("uploading_file_to_temp_host_started", file_path=file_path, mime_type=mime_type)
         
         # 1. Try tmpfiles.org
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 with open(file_path, "rb") as f:
-                    files = {"file": (os.path.basename(file_path), f, "video/mp4")}
+                    files = {"file": (os.path.basename(file_path), f, mime_type)}
                     resp = await client.post("https://tmpfiles.org/api/v1/upload", files=files)
                 
                 if resp.status_code == 200:
@@ -198,7 +316,7 @@ class InstagramPublisher:
                         url = data.get("data", {}).get("url")
                         if url:
                             direct_url = url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
-                            logger.info("uploading_video_to_temp_host_success_tmpfiles", url=direct_url)
+                            logger.info("uploading_file_to_temp_host_success_tmpfiles", url=direct_url)
                             return direct_url
         except Exception as e:
             logger.warning("upload_to_tmpfiles_failed", error=str(e))
@@ -210,15 +328,15 @@ class InstagramPublisher:
                     data = {
                         "reqtype": "fileupload"
                     }
-                    files = {"fileToUpload": (os.path.basename(file_path), f, "video/mp4")}
+                    files = {"fileToUpload": (os.path.basename(file_path), f, mime_type)}
                     resp = await client.post("https://catbox.moe/user/api.php", data=data, files=files)
                 
                 if resp.status_code == 200:
                     url = resp.text.strip()
                     if url.startswith("http://") or url.startswith("https://"):
-                        logger.info("uploading_video_to_temp_host_success_catbox", url=url)
+                        logger.info("uploading_file_to_temp_host_success_catbox", url=url)
                         return url
         except Exception as e:
             logger.warning("upload_to_catbox_failed", error=str(e))
             
-        raise RuntimeError("Failed to upload video to temporary public hosting for Instagram.")
+        raise RuntimeError("Failed to upload file to temporary public hosting for Instagram.")

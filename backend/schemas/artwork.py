@@ -15,6 +15,7 @@ class ArtworkCreate(BaseModel):
     """Schema for artwork upload metadata (file is sent as multipart)."""
 
     title: str | None = None
+    category: str = "gallery"
 
 
 class ArtworkResponse(BaseModel):
@@ -30,6 +31,7 @@ class ArtworkResponse(BaseModel):
     width: int | None
     height: int | None
     status: ArtworkStatus
+    category: str
     analysis_data: dict[str, Any] | None = None
     seo_data: dict[str, Any] | None = None
     caption: str | None = None

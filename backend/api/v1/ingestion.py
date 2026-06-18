@@ -107,6 +107,7 @@ async def ingest_artwork(
         content_type=content_type,
         title=body.title,
         source_url=image_url,
+        category=body.category,
     )
 
     # Check if this was a duplicate
@@ -223,6 +224,13 @@ async def cloudinary_webhook(
     if not filename or "." not in filename:
         filename = f"{public_id.replace('/', '_')}.{content_type.split('/')[-1]}"
 
+    # Determine category from folder structure if present
+    category = "gallery"
+    if "/" in public_id:
+        folder = public_id.split("/")[0]
+        if folder.lower() == "photography":
+            category = "photography"
+
     # Feed into the pipeline
     artwork_response = await service.upload_artwork(
         file_data=file_data,
@@ -230,6 +238,7 @@ async def cloudinary_webhook(
         content_type=content_type,
         title=title,
         source_url=secure_url,
+        category=category,
     )
 
     is_duplicate = artwork_response.image_hash is not None and artwork_response.source_url != secure_url

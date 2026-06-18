@@ -595,28 +595,27 @@ async def publish_instagram(state: ArtworkWorkflowState) -> dict[str, Any]:
     _update_artwork_multiple_fields(artwork_id, {"instagram_status": "pending"})
 
     try:
-        # Load reel_path and caption from DB
+        # Load details from DB
         from backend.database.session import get_sync_session
         from backend.models.artwork import Artwork
         from sqlalchemy import select
 
         session = get_sync_session()
         reel_path = None
+        file_path = None
         caption = None
+        category = "gallery"
         try:
             art = session.execute(
                 select(Artwork).where(Artwork.id == uuid.UUID(artwork_id))
             ).scalar_one_or_none()
             if art:
                 reel_path = art.reel_path
+                file_path = art.file_path
                 caption = art.caption
+                category = art.category or "gallery"
         finally:
             session.close()
-
-        if not reel_path:
-            raise ValueError("No generated reel path found to publish.")
-        if not caption:
-            raise ValueError("No caption found to publish.")
 
         # Transition to processing status
         _update_run_publishing_status(workflow_id, "instagram", "processing")
@@ -624,10 +623,38 @@ async def publish_instagram(state: ArtworkWorkflowState) -> dict[str, Any]:
 
         # Instantiate service and publish
         from backend.services.instagram_publisher import InstagramPublisher
-        publisher = InstagramPublisher()
+        from backend.config.settings import get_settings
+        
+        settings = get_settings()
+        
+        if category == "photography":
+            access_token = settings.instagram_acc2.access_token.get_secret_value() if settings.instagram_acc2.access_token else ""
+            account_id = settings.instagram_acc2.account_id
+            
+            if not access_token:
+                raise ValueError("Instagram Account 2 access token is not configured.")
+            if not account_id:
+                raise ValueError("Instagram Account 2 business account ID is not configured.")
+                
+            publisher = InstagramPublisher(access_token=access_token, account_id=account_id)
+            
+            if not file_path:
+                raise ValueError("No artwork file path found to publish.")
+            if not caption:
+                raise ValueError("No caption found to publish.")
+                
+            async def _publish_op():
+                return await publisher.publish_photo(file_path, caption)
+        else:
+            if not reel_path:
+                raise ValueError("No generated reel path found to publish.")
+            if not caption:
+                raise ValueError("No caption found to publish.")
+                
+            publisher = InstagramPublisher()
 
-        async def _publish_op():
-            return await publisher.publish_reel(reel_path, caption)
+            async def _publish_op():
+                return await publisher.publish_reel(reel_path, caption)
 
         # Enforce retry system logic (Phase 6)
         result = await _retry_on_transient(

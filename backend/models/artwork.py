@@ -162,6 +162,10 @@ class Artwork(UUIDMixin, TimestampMixin, Base):
         String(2000), nullable=True,
         comment="Original URL if ingested via webhook",
     )
+    category: Mapped[str] = mapped_column(
+        String(100), default="gallery", nullable=False, server_default="gallery",
+        comment="Category/section of the upload (e.g. gallery, photography)"
+    )
 
     # ── Relationships ────────────────────────────────────────────────────
     workflow_runs: Mapped[list["WorkflowRun"]] = relationship(
