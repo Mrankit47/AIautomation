@@ -46,7 +46,7 @@ def _should_generate_reel(state: ArtworkWorkflowState) -> str:
     # Skip reel and route to next active node
     if settings.feature_flags.enable_instagram_publish:
         return "publish_instagram"
-    if settings.feature_flags.enable_youtube_publish:
+    if settings.feature_flags.enable_youtube_publish and state.get("category") != "gallery":
         return "publish_youtube"
     if settings.feature_flags.enable_pinterest_publish:
         return "publish_pinterest"
@@ -63,7 +63,7 @@ def _after_reel(state: ArtworkWorkflowState) -> str:
     settings = get_settings()
     if settings.feature_flags.enable_instagram_publish:
         return "publish_instagram"
-    if settings.feature_flags.enable_youtube_publish:
+    if settings.feature_flags.enable_youtube_publish and state.get("category") != "gallery":
         return "publish_youtube"
     if settings.feature_flags.enable_pinterest_publish:
         return "publish_pinterest"
@@ -84,7 +84,7 @@ def _after_publish_instagram(state: ArtworkWorkflowState) -> str:
         return "end"
 
     settings = get_settings()
-    if settings.feature_flags.enable_youtube_publish:
+    if settings.feature_flags.enable_youtube_publish and state.get("category") != "gallery":
         return "publish_youtube"
     if settings.feature_flags.enable_pinterest_publish:
         return "publish_pinterest"

@@ -113,6 +113,7 @@ class ReelGenerator:
         output_path: str,
         reel_script: dict[str, Any],
         analysis: dict[str, Any] | None = None,
+        is_static: bool = False,
     ) -> str:
         """Generate a 1080x1920 MP4 reel with background music from an image and script using MoviePy.
 
@@ -121,6 +122,7 @@ class ReelGenerator:
             output_path: Absolute path where the generated MP4 will be saved.
             reel_script: Dictionary containing hook, script, CTA, and duration.
             analysis: Optional dictionary containing visual/emotional artwork analysis.
+            is_static: If True, generate a high-performance static video (photo + music) without overlays/motion.
 
         Returns:
             The output path of the generated video.
@@ -129,7 +131,7 @@ class ReelGenerator:
         self.validate_ffmpeg_env()
 
         start_time = time.monotonic()
-        logger.info("reel_render_started", image_path=image_path, output_path=output_path)
+        logger.info("reel_render_started", image_path=image_path, output_path=output_path, is_static=is_static)
 
         # Initialize resource tracking variables
         img = None
@@ -141,8 +143,11 @@ class ReelGenerator:
         out_file.parent.mkdir(parents=True, exist_ok=True)
 
         # 2. Extract and validate duration
-        duration = int(reel_script.get("duration_seconds", 15))
-        duration = max(10, min(duration, 60))  # Clamp between 10 and 60 seconds
+        if is_static:
+            duration = 15
+        else:
+            duration = int(reel_script.get("duration_seconds", 15))
+            duration = max(10, min(duration, 60))  # Clamp between 10 and 60 seconds
 
         # 3. Load and potentially downscale source image to prevent OOM
         resolved_image_path = Path(image_path).resolve().absolute()
@@ -156,18 +161,20 @@ class ReelGenerator:
 
         # Target vertical video: 720x1280 (Optimised for low-RAM Render Free tier)
         # Scale down original image if it is too large, saving RAM and CPU.
-        # Target crop height of 1500px provides ample room for 1.12x Ken Burns zoom and slow pan.
-        target_crop_h = 1500
-        orig_crop_h = min(orig_h, int(orig_w * 16 / 9))
-        if orig_crop_h > target_crop_h:
-            scale_factor = target_crop_h / orig_crop_h
-            new_w = int(orig_w * scale_factor)
-            new_h = int(orig_h * scale_factor)
-            logger.info("downscaling_source_image_for_rendering", original_size=(orig_w, orig_h), new_size=(new_w, new_h))
-            img_resized = img.resize((new_w, new_h), Image.Resampling.BILINEAR)
-            img.close()
-            img = img_resized
-            orig_w, orig_h = img.size
+        # For non-static, target crop height of 1500px provides room for 1.12x Ken Burns zoom and pan.
+        # For static, we don't need extra margin, so we can crop/resize directly.
+        if not is_static:
+            target_crop_h = 1500
+            orig_crop_h = min(orig_h, int(orig_w * 16 / 9))
+            if orig_crop_h > target_crop_h:
+                scale_factor = target_crop_h / orig_crop_h
+                new_w = int(orig_w * scale_factor)
+                new_h = int(orig_h * scale_factor)
+                logger.info("downscaling_source_image_for_rendering", original_size=(orig_w, orig_h), new_size=(new_w, new_h))
+                img_resized = img.resize((new_w, new_h), Image.Resampling.BILINEAR)
+                img.close()
+                img = img_resized
+                orig_w, orig_h = img.size
 
         # Vertical target: 720x1280
         target_w = 720
@@ -216,11 +223,28 @@ class ReelGenerator:
         frame_counter = 0
         import gc
         
+        static_frame = None
+
         def make_frame(t: float) -> np.ndarray:
-            nonlocal frame_counter
+            nonlocal frame_counter, static_frame
             frame_counter += 1
             if frame_counter % 24 == 0:
                 gc.collect()
+
+            if is_static:
+                if static_frame is not None:
+                    return static_frame
+                
+                left = max(0.0, center_x - crop_w / 2)
+                top = max(0.0, center_y - crop_h / 2)
+                right = min(float(orig_w), left + crop_w)
+                bottom = min(float(orig_h), top + crop_h)
+                
+                frame_img = img.crop((left, top, right, bottom)).resize(
+                    (target_w, target_h), Image.Resampling.BILINEAR
+                )
+                static_frame = np.array(frame_img)
+                return static_frame
 
             p = t / duration  # Progress percentage (0.0 to 1.0)
 

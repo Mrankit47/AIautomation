@@ -503,13 +503,48 @@ async def generate_reel(state: ArtworkWorkflowState) -> dict[str, Any]:
     """Node: Generate reel/short video from artwork."""
     artwork_id = state["artwork_id"]
     workflow_id = state["workflow_id"]
-    logger.info("node_execute", node="generate_reel", artwork_id=artwork_id)
+    category = state.get("category") or "gallery"
+    logger.info("node_execute", node="generate_reel", artwork_id=artwork_id, category=category)
     _update_run_node(workflow_id, "generate_reel")
 
     # Structured logging for start
     logger.info("reel_script_start", artwork_id=artwork_id, workflow_id=workflow_id)
 
     try:
+        from backend.config.settings import get_settings
+        settings = get_settings()
+        output_dir = os.path.join(settings.storage.local_path, "reels")
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
+
+        output_path = os.path.join(output_dir, f"{artwork_id}.mp4")
+
+        if category == "gallery":
+            logger.info("generating_static_photo_video_for_gallery", artwork_id=artwork_id, workflow_id=workflow_id)
+            
+            generator = ReelGenerator()
+            reel_path = generator.generate_reel(
+                image_path=state["image_path"],
+                output_path=output_path,
+                reel_script={},
+                analysis=state.get("analysis"),
+                is_static=True,
+            )
+            
+            _update_artwork_multiple_fields(
+                artwork_id,
+                {
+                    "reel_script": None,
+                    "reel_path": reel_path,
+                }
+            )
+            
+            return {
+                "reel_script": None,
+                "reel_path": reel_path,
+                "current_node": "generate_reel",
+            }
+
         agent = ReelScriptAgent()
         context = {
             "analysis": state["analysis"],
@@ -523,12 +558,6 @@ async def generate_reel(state: ArtworkWorkflowState) -> dict[str, Any]:
         # Real reel rendering instead of simulated path
         logger.info("reel_render_started", artwork_id=artwork_id, workflow_id=workflow_id)
 
-        output_dir = "/app/outputs/reels"
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir, exist_ok=True)
-
-        output_path = os.path.join(output_dir, f"{artwork_id}.mp4")
-
         try:
             generator = ReelGenerator()
             reel_path = generator.generate_reel(
@@ -536,6 +565,7 @@ async def generate_reel(state: ArtworkWorkflowState) -> dict[str, Any]:
                 output_path=output_path,
                 reel_script=result.data,
                 analysis=state.get("analysis"),
+                is_static=False,
             )
             logger.info("reel_render_completed", artwork_id=artwork_id, workflow_id=workflow_id, reel_path=reel_path)
         except Exception as render_exc:
@@ -702,6 +732,18 @@ async def publish_youtube(state: ArtworkWorkflowState) -> dict[str, Any]:
     """Node: Publish to YouTube Shorts."""
     artwork_id = state["artwork_id"]
     workflow_id = state["workflow_id"]
+    category = state.get("category") or "gallery"
+
+    if category == "gallery":
+        logger.info("youtube_publish_skipped_for_gallery_category", artwork_id=artwork_id, workflow_id=workflow_id)
+        _update_run_node(workflow_id, "publish_youtube")
+        _update_artwork_multiple_fields(artwork_id, {"youtube_status": "skipped"})
+        _update_run_publishing_status(workflow_id, "youtube", "skipped")
+        return {
+            "youtube_status": "skipped",
+            "current_node": "publish_youtube",
+        }
+
     logger.info("youtube_publish_started", artwork_id=artwork_id, workflow_id=workflow_id)
     _update_run_node(workflow_id, "publish_youtube")
     _emit_event(workflow_id, "publish_youtube", "started")
