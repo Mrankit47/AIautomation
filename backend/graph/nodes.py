@@ -7,11 +7,11 @@ partial state update dict.
 
 from __future__ import annotations
 
+import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-import os
 from backend.agents.artwork_analyzer import ArtworkAnalyzerAgent
 from backend.agents.caption_agent import CaptionAgent
 from backend.agents.hashtag_agent import HashtagAgent
@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 
 
 def _timestamp() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _make_error(node: str, exc: Exception) -> dict[str, Any]:
@@ -49,9 +49,10 @@ def _update_run_node(
     error_history: list | None = None,
 ) -> None:
     """Update current_node and overall status in the workflow run."""
+    from sqlalchemy import select
+
     from backend.database.session import get_sync_session
     from backend.models.workflow_run import WorkflowRun, WorkflowStatus
-    from sqlalchemy import select
 
     session = get_sync_session()
     try:
@@ -91,9 +92,10 @@ def _update_run_publishing_status(
     status: str,
 ) -> None:
     """Update publishing status for a platform in the workflow run."""
+    from sqlalchemy import select
+
     from backend.database.session import get_sync_session
     from backend.models.workflow_run import WorkflowRun
-    from sqlalchemy import select
 
     session = get_sync_session()
     try:
@@ -118,9 +120,10 @@ def _update_artwork_multiple_fields(
     status: str | None = None,
 ) -> None:
     """Update multiple fields on the Artwork model."""
+    from sqlalchemy import select
+
     from backend.database.session import get_sync_session
     from backend.models.artwork import Artwork, ArtworkStatus
-    from sqlalchemy import select
 
     session = get_sync_session()
     try:
@@ -162,9 +165,10 @@ def _emit_event(
     This provides a full audit trail of every node execution in the
     workflow, including timing data, errors, and retry attempts.
     """
+    from datetime import datetime as dt
+
     from backend.database.session import get_sync_session
     from backend.models.workflow_event import WorkflowEvent
-    from datetime import datetime as dt, timezone as tz
 
     session = get_sync_session()
     try:
@@ -172,7 +176,7 @@ def _emit_event(
             workflow_run_id=uuid.UUID(workflow_run_id),
             node_name=node_name,
             event_type=event_type,
-            started_at=started_at or dt.now(tz.utc),
+            started_at=started_at or dt.now(UTC),
             completed_at=completed_at,
             duration_ms=duration_ms,
             error_message=error_message,
@@ -301,9 +305,10 @@ async def analyze_artwork(state: ArtworkWorkflowState) -> dict[str, Any]:
     try:
         # Load the artwork title from DB
         artwork_title = None
+        from sqlalchemy import select
+
         from backend.database.session import get_sync_session
         from backend.models.artwork import Artwork
-        from sqlalchemy import select
 
         session = get_sync_session()
         try:
@@ -521,7 +526,7 @@ async def generate_reel(state: ArtworkWorkflowState) -> dict[str, Any]:
 
         if category == "gallery":
             logger.info("generating_static_photo_video_for_gallery", artwork_id=artwork_id, workflow_id=workflow_id)
-            
+
             generator = ReelGenerator()
             reel_path = generator.generate_reel(
                 image_path=state["image_path"],
@@ -530,7 +535,7 @@ async def generate_reel(state: ArtworkWorkflowState) -> dict[str, Any]:
                 analysis=state.get("analysis"),
                 is_static=True,
             )
-            
+
             _update_artwork_multiple_fields(
                 artwork_id,
                 {
@@ -538,7 +543,7 @@ async def generate_reel(state: ArtworkWorkflowState) -> dict[str, Any]:
                     "reel_path": reel_path,
                 }
             )
-            
+
             return {
                 "reel_script": None,
                 "reel_path": reel_path,
@@ -626,9 +631,10 @@ async def publish_instagram(state: ArtworkWorkflowState) -> dict[str, Any]:
 
     try:
         # Load details from DB
+        from sqlalchemy import select
+
         from backend.database.session import get_sync_session
         from backend.models.artwork import Artwork
-        from sqlalchemy import select
 
         session = get_sync_session()
         reel_path = None
@@ -652,39 +658,39 @@ async def publish_instagram(state: ArtworkWorkflowState) -> dict[str, Any]:
         _update_artwork_multiple_fields(artwork_id, {"instagram_status": "processing"})
 
         # Instantiate service and publish
-        from backend.services.instagram_publisher import InstagramPublisher
         from backend.config.settings import get_settings
-        
+        from backend.services.instagram_publisher import InstagramPublisher
+
         settings = get_settings()
-        
+
         if category == "photography":
             access_token = settings.instagram_acc2.access_token.get_secret_value() if settings.instagram_acc2.access_token else ""
             account_id = settings.instagram_acc2.account_id
-            
+
             if not access_token:
                 raise ValueError("Instagram Account 2 access token is not configured.")
             if not account_id:
                 raise ValueError("Instagram Account 2 business account ID is not configured.")
-                
+
             publisher = InstagramPublisher(access_token=access_token, account_id=account_id)
-            
+
             if not file_path:
                 raise ValueError("No artwork file path found to publish.")
             if not caption:
                 raise ValueError("No caption found to publish.")
-                
+
             async def _publish_op():
                 return await publisher.publish_photo(file_path, caption)
         else:
-            if not reel_path:
-                raise ValueError("No generated reel path found to publish.")
+            if not file_path:
+                raise ValueError("No artwork file path found to publish.")
             if not caption:
                 raise ValueError("No caption found to publish.")
-                
+
             publisher = InstagramPublisher()
 
             async def _publish_op():
-                return await publisher.publish_reel(reel_path, caption)
+                return await publisher.publish_photo(file_path, caption)
 
         # Enforce retry system logic (Phase 6)
         result = await _retry_on_transient(
@@ -753,9 +759,10 @@ async def publish_youtube(state: ArtworkWorkflowState) -> dict[str, Any]:
 
     try:
         # Load reel_path, youtube_title, and youtube_description from DB
+        from sqlalchemy import select
+
         from backend.database.session import get_sync_session
         from backend.models.artwork import Artwork
-        from sqlalchemy import select
 
         session = get_sync_session()
         reel_path = None
@@ -845,9 +852,10 @@ async def publish_pinterest(state: ArtworkWorkflowState) -> dict[str, Any]:
 
     try:
         # Load storage_url, title, caption and hashtags from DB
+        from sqlalchemy import select
+
         from backend.database.session import get_sync_session
         from backend.models.artwork import Artwork
-        from sqlalchemy import select
 
         session = get_sync_session()
         storage_url = None
@@ -961,10 +969,11 @@ async def collect_analytics(state: ArtworkWorkflowState) -> dict[str, Any]:
     _update_run_node(workflow_id, "collect_analytics")
 
     # Load artwork details and invoke publisher analytics
-    from backend.database.session import get_sync_session
-    from backend.models.artwork import Artwork
-    from backend.models.analytics import ArtworkAnalytics
     from sqlalchemy import select
+
+    from backend.database.session import get_sync_session
+    from backend.models.analytics import ArtworkAnalytics
+    from backend.models.artwork import Artwork
 
     session = get_sync_session()
     try:
@@ -978,7 +987,7 @@ async def collect_analytics(state: ArtworkWorkflowState) -> dict[str, Any]:
                     from backend.services.instagram_analytics import InstagramAnalyticsService
                     ig_service = InstagramAnalyticsService()
                     ig_metrics = await ig_service.collect_metrics(art.instagram_post_id)
-                    
+
                     ig_analytics = ArtworkAnalytics(
                         artwork_id=art.id,
                         platform="instagram",
@@ -1003,7 +1012,7 @@ async def collect_analytics(state: ArtworkWorkflowState) -> dict[str, Any]:
                     from backend.services.youtube_analytics import YouTubeAnalyticsService
                     yt_service = YouTubeAnalyticsService()
                     yt_metrics = await yt_service.collect_metrics(art.youtube_video_id, art.youtube_published_at)
-                    
+
                     yt_analytics = ArtworkAnalytics(
                         artwork_id=art.id,
                         platform="youtube",
