@@ -302,8 +302,37 @@ class InstagramPublisher:
         mime_type = mime_type or "application/octet-stream"
         
         logger.info("uploading_file_to_temp_host_started", file_path=file_path, mime_type=mime_type)
-        
-        # 1. Try tmpfiles.org
+
+        async def _is_valid_direct_media_url(client: httpx.AsyncClient, url: str) -> bool:
+            try:
+                # Send GET with Meta User-Agent to verify what Meta Graph API will receive
+                meta_headers = {"User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"}
+                res = await client.get(url, headers=meta_headers, follow_redirects=True, timeout=10.0)
+                ct = res.headers.get("content-type", "").lower()
+                if res.status_code == 200 and not ct.startswith("text/html"):
+                    return True
+                logger.warning("temp_host_url_returned_invalid_content_type", url=url, status_code=res.status_code, content_type=ct)
+            except Exception as check_err:
+                logger.warning("temp_host_url_check_failed", url=url, error=str(check_err))
+            return False
+
+        # 1. Try catbox.moe (Direct CDN URL for images and videos)
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                with open(file_path, "rb") as f:
+                    data = {"reqtype": "fileupload"}
+                    files = {"fileToUpload": (os.path.basename(file_path), f, mime_type)}
+                    resp = await client.post("https://catbox.moe/user/api.php", data=data, files=files)
+                
+                if resp.status_code == 200:
+                    url = resp.text.strip()
+                    if (url.startswith("http://") or url.startswith("https://")) and await _is_valid_direct_media_url(client, url):
+                        logger.info("uploading_file_to_temp_host_success_catbox", url=url)
+                        return url
+        except Exception as e:
+            logger.warning("upload_to_catbox_failed", error=str(e))
+
+        # 2. Try tmpfiles.org as fallback (with direct media validation)
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 with open(file_path, "rb") as f:
@@ -316,27 +345,11 @@ class InstagramPublisher:
                         url = data.get("data", {}).get("url")
                         if url:
                             direct_url = url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
-                            logger.info("uploading_file_to_temp_host_success_tmpfiles", url=direct_url)
-                            return direct_url
+                            if await _is_valid_direct_media_url(client, direct_url):
+                                logger.info("uploading_file_to_temp_host_success_tmpfiles", url=direct_url)
+                                return direct_url
         except Exception as e:
             logger.warning("upload_to_tmpfiles_failed", error=str(e))
-
-        # 2. Try catbox.moe as fallback
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                with open(file_path, "rb") as f:
-                    data = {
-                        "reqtype": "fileupload"
-                    }
-                    files = {"fileToUpload": (os.path.basename(file_path), f, mime_type)}
-                    resp = await client.post("https://catbox.moe/user/api.php", data=data, files=files)
-                
-                if resp.status_code == 200:
-                    url = resp.text.strip()
-                    if url.startswith("http://") or url.startswith("https://"):
-                        logger.info("uploading_file_to_temp_host_success_catbox", url=url)
-                        return url
-        except Exception as e:
-            logger.warning("upload_to_catbox_failed", error=str(e))
             
         raise RuntimeError("Failed to upload file to temporary public hosting for Instagram.")
+
